@@ -1,11 +1,3 @@
-# ODEL LAB MASTER MANUAL & PRACTICAL LEARNING HANDBOOK
-# WEB TECHNOLOGIES & FULL-STACK LABORATORY
-
-> **Central Reference Application:** CampusConnect — Student Project Management Portal  
-> **Target Frameworks & Tools:** Figma, HTML5, CSS3, JavaScript (ES6+), AngularJS 1.8.2, Node.js (LTS), Express.js 4.x, MongoDB 6.x/7.x & Mongoose 7.x, Selenium WebDriver 4.x (Python / pytest), XML, DTD, XSLT 1.0, XPath 1.0, XQuery 1.0/3.0.  
-> **Operating Environments:** Windows PowerShell (Primary) and Ubuntu/Debian Linux (Cross-platform reference).  
-
----
 
 ## TABLE OF CONTENTS
 1. [PART A — System Architecture, Fundamentals & Environment Setup](#part-a--system-architecture-fundamentals--environment-setup)
@@ -3445,3 +3437,616 @@ During practical exams, examiners may assign different domain problems. The unde
 2. **Backend Routes (`routes/`):** Update route paths (e.g., change `/api/projects` to `/api/patients`).
 3. **Frontend Service (`services/`):** Update the base URL endpoint in `ProjectService.js`.
 4. **Frontend Form & Table (`views/`):** Rename input fields, labels, and table header titles to match the new entity fields.
+
+simple
+Web Technology Lab --- Experiment Notes and Code Guide
+This revision guide covers the Web Technology experiments discussed so
+far: 1. Student Management CRUD using AngularJS, Node.js, Express, and
+MongoDB 2. XML with internal and external DTD 3. XML formatting using
+CSS 4. XML transformation using XSLT 5. Login-page testing using
+Selenium with Python
+
+Each experiment includes the aim, code, explanation, run steps, and the
+exact parts you may need to replace.
+Experiment 1: Student Management System using AngularJS, Node.js, Express, and MongoDB
+Aim
+To create a Student Management application that can add, display,
+update, and delete student records using an AngularJS frontend and a
+MongoDB database.
+Requirements
+- Node.js and npm
+- MongoDB Atlas or a local MongoDB installation
+- Browser with internet access for the AngularJS CDN
+- VS Code or another editor
+Folder structure
+Web Technology/
+├── index.html
+├── server.js
+├── package.json
+└── node_modules/
+Step 1: Install packages
+npm init -y
+npm install express mongoose
+express creates the web server and API routes. mongoose connects
+Node.js to MongoDB and works with student documents.
+Step 2: Create index.html
+<!DOCTYPE html>
+<html ng-app="myApp">
+<head>
+    <title>Student Management</title>
+    <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.8.2/angular.min.js"></script>
+</head>
+<body ng-controller="myCtrl">
+
+    <h2>Student Management System</h2>
+
+    <input ng-model="name" placeholder="Enter Name">
+    <input ng-model="dept" placeholder="Enter Department">
+    <button ng-click="save()">Save Student</button>
+
+    <h3>Student List</h3>
+    <ul>
+        <li ng-repeat="s in students track by s._id">
+            {{s.name}} - {{s.dept}}
+            <button ng-click="edit(s)">Edit</button>
+            <button ng-click="remove(s._id)">Delete</button>
+        </li>
+    </ul>
+
+    <script>
+        var app = angular.module("myApp", []);
+
+        app.controller("myCtrl", function($scope, $http) {
+            var url = "/students";
+            $scope.students = [];
+            $scope.id = "";
+
+            // READ
+            $scope.load = function() {
+                $http.get(url).then(function(res) {
+                    $scope.students = res.data;
+                });
+            };
+
+            // CREATE and UPDATE
+            $scope.save = function() {
+                if (!$scope.name || !$scope.dept) {
+                    alert("Enter name and department");
+                    return;
+                }
+
+                var data = {
+                    name: $scope.name,
+                    dept: $scope.dept
+                };
+
+                if ($scope.id) {
+                    $http.put(url + "/" + $scope.id, data)
+                    .then(function() {
+                        $scope.clear();
+                        $scope.load();
+                    });
+                } else {
+                    $http.post(url, data)
+                    .then(function() {
+                        $scope.clear();
+                        $scope.load();
+                    });
+                }
+            };
+
+            $scope.edit = function(s) {
+                $scope.id = s._id;
+                $scope.name = s.name;
+                $scope.dept = s.dept;
+            };
+
+            // DELETE
+            $scope.remove = function(id) {
+                $http.delete(url + "/" + id)
+                .then(function() {
+                    $scope.load();
+                });
+            };
+
+            $scope.clear = function() {
+                $scope.id = "";
+                $scope.name = "";
+                $scope.dept = "";
+            };
+
+            $scope.load();
+        });
+    </script>
+</body>
+</html>
+Step 3: Create server.js
+Replace YOUR_MONGODB_CONNECTION_STRING with your own MongoDB URI. Do
+not share it publicly.
+const express = require("express");
+const mongoose = require("mongoose");
+
+const app = express();
+
+app.use(express.json());
+app.use(express.static("."));
+
+mongoose.connect("YOUR_MONGODB_CONNECTION_STRING")
+.then(() => console.log("MongoDB Connected"))
+.catch(err => console.log("MongoDB connection error:", err.message));
+
+const Student = mongoose.model("Student", {
+    name: String,
+    dept: String
+});
+
+// READ
+app.get("/students", async (req, res) => {
+    try {
+        res.json(await Student.find());
+    } catch (err) {
+        res.status(500).json({ error: "Could not fetch students" });
+    }
+});
+
+// CREATE
+app.post("/students", async (req, res) => {
+    try {
+        const student = new Student(req.body);
+        await student.save();
+        res.json(student);
+    } catch (err) {
+        res.status(400).json({ error: "Could not save student" });
+    }
+});
+
+// UPDATE
+app.put("/students/:id", async (req, res) => {
+    try {
+        const student = await Student.findByIdAndUpdate(
+            req.params.id,
+            req.body,
+            { new: true, runValidators: true }
+        );
+        if (!student) {
+            return res.status(404).json({ error: "Student not found" });
+        }
+        res.json(student);
+    } catch (err) {
+        res.status(400).json({ error: "Could not update student" });
+    }
+});
+
+// DELETE
+app.delete("/students/:id", async (req, res) => {
+    try {
+        const student = await Student.findByIdAndDelete(req.params.id);
+        if (!student) {
+            return res.status(404).json({ error: "Student not found" });
+        }
+        res.json({ message: "Student deleted" });
+    } catch (err) {
+        res.status(400).json({ error: "Could not delete student" });
+    }
+});
+
+app.listen(5000, () => {
+    console.log("Server running on port 5000");
+});
+What must be replaced?
+- Replace YOUR_MONGODB_CONNECTION_STRING with your own Atlas URI.
+- If your database password contains special characters, URL-encode
+  them in the URI.
+- Port 5000 can be changed, but then use the new port in the browser
+  URL too.
+- The frontend and API are served from the same origin, so CORS is not
+  required in this example.
+Run the experiment
+node server.js
+Expected terminal messages after a successful connection:
+MongoDB Connected
+Server running on port 5000
+Open http://localhost:5000.
+CRUD explanation
+  Operation   HTTP method   Backend method                 Purpose
+  Create      POST          new Student() and save()   Adds a student
+  Read        GET           Student.find()               Lists students
+  Update      PUT           findByIdAndUpdate()          Updates a student
+  Delete      DELETE        findByIdAndDelete()          Removes a student
+Important AngularJS concepts
+- ng-app: starts the AngularJS application.
+- ng-controller: connects the page to a controller.
+- ng-model: binds an input to a scope variable.
+- ng-click: calls a function when clicked.
+- ng-repeat: repeats markup for each student.
+- $http.get/post/put/delete: sends HTTP requests to the backend.
+Troubleshooting
+- MongoDB connection error: check the URI, database
+  username/password, Atlas IP allowlist, and internet connection.
+- Page does not load: make sure node server.js is running and
+  visit http://localhost:5000.
+- AngularJS does not work: check internet access because the
+  library is loaded from a CDN.
+- Port already in use: change 5000 in app.listen() and use
+  that port in the browser.
+Experiment 2: XML with DTD
+Aim
+To create an XML document for student details and define its valid
+structure using a Document Type Definition (DTD).
+What is XML?
+XML (Extensible Markup Language) stores structured data using tags
+chosen by the author.
+What is DTD?
+DTD (Document Type Definition) defines which elements and attributes are
+allowed in an XML document and how elements can be arranged.
+
+Types: 1. Internal DTD: declarations are inside the XML document. 2.
+External DTD: declarations are stored in a separate .dtd file.
+Important DTD symbols
+  Syntax                  Meaning                 Example
+  +                     One or more             student+
+
+  *                     Zero or more            subject*
+
+  ?                     Zero or one             middleName?
+
+  ,                     Elements in this order  (name, age, department)
+
+  |                     One alternative         (email | phone)
+
+  No suffix               Exactly one             name
+
+  #PCDATA               Text content in an      <!ELEMENT name (#PCDATA)>
+                          element                 
+
+  EMPTY                 Element has no content  <!ELEMENT br EMPTY>
+
+  ANY                   Any content allowed by  <!ELEMENT note ANY>
+                      the declared model      
+Option A: External DTD
+File 1: student.dtd
+<!ELEMENT students (student+)>
+<!ELEMENT student (name, age, department, subject*)>
+<!ATTLIST student id CDATA #REQUIRED>
+<!ELEMENT name (#PCDATA)>
+<!ELEMENT age (#PCDATA)>
+<!ELEMENT department (#PCDATA)>
+<!ELEMENT subject (#PCDATA)>
+File 2: student.xml
+<?xml version="1.0"?>
+<!DOCTYPE students SYSTEM "student.dtd">
+<students>
+    <student id="S101">
+        <name>Arun</name>
+        <age>20</age>
+        <department>IT</department>
+        <subject>XML</subject>
+        <subject>Java</subject>
+    </student>
+
+    <student id="S102">
+        <name>Priya</name>
+        <age>19</age>
+        <department>CSE</department>
+    </student>
+</students>
+Keep both files in the same folder.
+Option B: Internal DTD
+<?xml version="1.0"?>
+<!DOCTYPE students [
+    <!ELEMENT students (student+)>
+    <!ELEMENT student (name, age, department, subject*)>
+    <!ATTLIST student id CDATA #REQUIRED>
+    <!ELEMENT name (#PCDATA)>
+    <!ELEMENT age (#PCDATA)>
+    <!ELEMENT department (#PCDATA)>
+    <!ELEMENT subject (#PCDATA)>
+]>
+<students>
+    <student id="S101">
+        <name>Arun</name>
+        <age>20</age>
+        <department>IT</department>
+        <subject>XML</subject>
+        <subject>Java</subject>
+    </student>
+</students>
+Explanation
+- students (student+): root contains one or more student elements.
+- student (name, age, department, subject*): each student has name,
+  age, and department in that order, followed by zero or more
+  subjects.
+- id CDATA #REQUIRED: each student must have an id attribute.
+  CDATA here is an attribute type.
+- name (#PCDATA): the element contains text.
+- subject*: a student may have zero or many subjects.
+Validation (optional)
+Opening XML in a browser does not always validate it against a DTD. With
+Python's lxml installed, this script validates the external-DTD
+example:
+from lxml import etree
+
+parser = etree.XMLParser(load_dtd=True, dtd_validation=True)
+
+try:
+    etree.parse("student.xml", parser)
+    print("XML is valid")
+except etree.XMLSyntaxError as e:
+    print("XML is invalid:", e)
+Install and run:
+python -m pip install lxml
+python validate.py
+Keep student.xml, student.dtd, and validate.py in the same folder.
+Only validate XML/DTD files you trust because external resource loading
+can have security implications.
+
+Remember: CDATA in ATTLIST is an attribute type. #PCDATA
+describes text content in an element. XML <![CDATA[ ... ]]> sections
+are a separate feature.
+Experiment 3: XML Formatting using CSS
+Aim
+To display XML data with styling using a CSS stylesheet.
+File 1: student.xml
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/css" href="style.css"?>
+
+<students>
+    <student>
+        <name>Arun</name>
+        <department>IT</department>
+    </student>
+    <student>
+        <name>Priya</name>
+        <department>CSE</department>
+    </student>
+</students>
+File 2: style.css
+students {
+    display: block;
+    font-family: Arial, sans-serif;
+    background-color: lightyellow;
+}
+
+student {
+    display: block;
+    margin: 15px;
+    padding: 10px;
+    background-color: lightblue;
+}
+
+name {
+    display: block;
+    color: blue;
+    font-weight: bold;
+}
+
+department {
+    display: block;
+    color: green;
+}
+Explanation
+- xml-stylesheet links the XML file to the CSS file.
+- display: block displays an element on a separate line.
+- color changes text color.
+- background-color changes background color.
+- margin and padding add spacing.
+Steps
+1. Save student.xml and style.css in the same folder.
+2. Open student.xml in a browser that supports XML stylesheets.
+3. If local files are restricted by the browser, serve the folder
+   through a local web server.
+Expected result: names and departments are displayed with the CSS
+styles. Exact appearance depends on browser support.
+Experiment 4: XML Transformation using XSLT
+Aim
+To transform XML student data into an HTML table using XSLT.
+File 1: student.xml
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" href="student.xsl"?>
+
+<students>
+    <student>
+        <name>Arun</name>
+        <department>IT</department>
+    </student>
+    <student>
+        <name>Priya</name>
+        <department>CSE</department>
+    </student>
+</students>
+File 2: student.xsl
+<?xml version="1.0"?>
+<xsl:stylesheet
+    version="1.0"
+    xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+
+    <xsl:template match="/">
+        <html>
+        <body>
+            <h2>Student Details</h2>
+            <table border="1">
+                <tr>
+                    <th>Name</th>
+                    <th>Department</th>
+                </tr>
+
+                <xsl:for-each select="students/student">
+                    <tr>
+                        <td><xsl:value-of select="name"/></td>
+                        <td><xsl:value-of select="department"/></td>
+                    </tr>
+                </xsl:for-each>
+            </table>
+        </body>
+        </html>
+    </xsl:template>
+
+</xsl:stylesheet>
+Explanation
+- xsl:stylesheet: declares the XSLT stylesheet.
+- xsl:template match="/": defines the template for the document
+  root.
+- xsl:for-each: loops through every student.
+- xsl:value-of: outputs a selected XML value.
+- HTML table, tr, th, and td display the result.
+Expected output
+  Name    Department
+  Arun    IT
+  Priya   CSE
+CSS vs XSLT
+  CSS                                 XSLT
+  Styles XML appearance               Transforms XML into HTML or another
+                                      output
+
+  Controls colors, fonts, spacing     Can select, repeat, rearrange, and
+                                      output data
+  Uses .css                         Uses .xsl
+Experiment 5: Login Page Testing using Selenium with Python
+Aim
+To automate a login-page test using Selenium WebDriver and verify
+whether valid credentials display the expected success message.
+Requirements
+- Python installed
+- Google Chrome installed
+- Selenium package
+Install Selenium:
+python -m pip install selenium
+Current Selenium versions usually use Selenium Manager to manage
+ChromeDriver automatically, so a separate manual ChromeDriver
+installation is generally unnecessary.
+Folder structure
+E:\Web Lab\
+├── login.html
+└── test.py
+File 1: login.html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Login Page</title>
+</head>
+<body>
+    <h2>Login</h2>
+
+    <form onsubmit="return login()">
+        <input type="text" id="username" placeholder="Username">
+        <br><br>
+
+        <input type="password" id="password" placeholder="Password">
+        <br><br>
+
+        <button type="submit">Login</button>
+    </form>
+
+    <p id="message"></p>
+
+    <script>
+        function login() {
+            var u = document.getElementById("username").value;
+            var p = document.getElementById("password").value;
+
+            if (u === "admin" && p === "1234") {
+                document.getElementById("message").innerHTML =
+                    "Login Successful";
+            } else {
+                document.getElementById("message").innerHTML =
+                    "Invalid Credentials";
+            }
+
+            return false;
+        }
+    </script>
+</body>
+</html>
+File 2: test.py
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+
+driver = webdriver.Chrome()
+
+# Replace this path if your HTML file is elsewhere or has another name
+driver.get("file:///E:/Web%20Lab/login.html")
+
+driver.find_element(By.ID, "username").send_keys("admin")
+driver.find_element(By.ID, "password").send_keys("1234")
+
+# This HTML button has no ID
+driver.find_element(By.TAG_NAME, "button").click()
+
+result = driver.find_element(By.ID, "message").text
+print("Result:", result)
+
+if result == "Login Successful":
+    print("TEST PASSED")
+else:
+    print("TEST FAILED")
+
+driver.quit()
+Exactly what to replace
+1. HTML path: Replace file:///E:/Web%20Lab/login.html with the
+   actual path and filename. Keep file:/// and use forward slashes.
+   %20 represents the space in Web Lab.
+2. Credentials: Replace admin and 1234 to test other
+   credentials.
+3. Success message: Replace "Login Successful" if the page
+   displays a different message.
+4. Element IDs: The Python IDs must match the HTML IDs: username,
+   password, and message.
+5. Button locator: By.TAG_NAME, "button" works for this simple
+   page because it has one button. If the page has multiple buttons,
+   add id="login" to the login button and use By.ID, "login".
+Run the experiment
+python test.py
+Expected output with valid credentials:
+Result: Login Successful
+TEST PASSED
+Test cases
+  Test                Username   Password   Expected result
+  Valid login         admin    1234     Login Successful
+  Invalid password    admin    wrong    Invalid Credentials
+  Invalid username    user     1234     Invalid Credentials
+  Empty credentials   empty      empty      Invalid Credentials
+
+Change the values passed to send_keys() for each test. For a negative
+test, also change the if condition to compare against
+"Invalid Credentials" if you want the negative case to print
+TEST PASSED.
+Important Selenium commands
+  Command                Purpose
+  webdriver.Chrome()   Opens Chrome
+  driver.get()         Opens a webpage or local HTML file
+  find_element()       Locates an element
+  By.ID                Locates by HTML ID
+  By.TAG_NAME          Locates by HTML tag
+  send_keys()          Types into a field
+  click()              Clicks an element
+  .text                Reads visible text
+  quit()               Closes the browser session
+Common error: NoSuchElementException
+Selenium could not find an element using the locator.
+
+Check: - Did you open the correct HTML file, not the Python file? - Does
+the element have the ID used in Python? - Has the page loaded before
+Selenium searches? - Is the element inside an iframe? If so, switch to
+the iframe first.
+Quick Revision
+MongoDB CRUD
+- POST = Create
+- GET = Read
+- PUT = Update
+- DELETE = Delete
+- Start with node server.js.
+XML and DTD
+- XML stores structured data.
+- DTD defines the allowed structure.
+- Internal DTD is inside XML; external DTD is in a .dtd file.
+- + = one or more; * = zero or more; ? = zero or one.
+- CDATA in ATTLIST is an attribute type; #PCDATA describes
+  element text.
+XML formatters
+- CSS styles XML.
+- XSLT transforms XML, often into HTML.
+Selenium
+- Install with python -m pip install selenium.
+- Locate fields, type values, click login, read the result, and verify
+  it.
+- Ensure the file path and HTML IDs match.
