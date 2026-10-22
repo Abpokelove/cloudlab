@@ -1,4 +1,4 @@
-# Cloud Computing Lab Cheat Sheet (v2)
+# Cloud Computing Lab Cheat Sheet (v3, Ubuntu VM edition)
 
 Covers: Exp 2A, 2B, 2C, 3, 4, 5, 6, 8, 9, 10, 11A, 11B, 12 (Exp 1 and 7 omitted).
 
@@ -8,6 +8,8 @@ Covers: Exp 2A, 2B, 2C, 3, 4, 5, 6, 8, 9, 10, 11A, 11B, 12 (Exp 1 and 7 omitted)
 - Code is written **generically**: each experiment has a small `CONFIG` block at the top. In the exam, change only those lines (resource name, fields, API URL) to match the question.
 - Commands are labelled **Ubuntu** (also WSL) or **Windows (PowerShell)**. Never paste shell commands into a `scala>` or JS console.
 - Cloud services (Firebase, Dropbox, Atlas, Auth0, NASA) need internet and an account. Local fallbacks are given where possible.
+- **Using an Ubuntu VM?** If any `sudo apt ...` command says "Could not get lock ... held by process", jump to **Part 2, Section A3** (one-command fix). Part 2 (Experiments 8 to 12) also has "already installed? check first" blocks and a failure-fix list for every experiment.
+- Section numbers 1) to 7) in Part 1 are just headings; the experiment numbers are in the titles.
 
 ---
 
@@ -366,8 +368,8 @@ app.listen(PORT, () => console.log(`Open http://localhost:${PORT}`));
   <script>
     const presets = {
       nasa: 'date=2024-01-01',
-      weather: 'latitude=16.3067&longitude=80.4365',
-      openweather: 'q=Guntur',
+      weather: 'latitude=13.08&longitude=80.27',
+      openweather: 'q=Chennai',
       posts: '_limit=3'
     };
     document.getElementById('service').onchange = e =>
@@ -454,7 +456,7 @@ let nextId = Math.max(0, ...items.map(i => i.id)) + 1;
 const base = `/api/${RESOURCE}`;
 const validate = (body, partial = false) =>
   (partial ? schema.fork(Object.keys(schema.describe().keys), s => s.optional()) : schema)
-    .validate(body, { abortEarly: false, stripUnknown: true });
+    .validate(body ?? {}, { abortEarly: false, stripUnknown: true });
 
 const findIndex = req => items.findIndex(i => i.id === parseInt(req.params.id));
 
@@ -1427,410 +1429,380 @@ cd auth0-spa-two && npm run dev -- --port 5174
 
 ---
 
-# Cloud Lab Cheat Sheet v2: Part 2 (Exp 8 to 12, Ubuntu VM)
 
-Assumed numbering: **Exp 8A** OpenMP, **Exp 8B** MPI, **Exp 9** Hadoop 3.3.6, **Exp 10** Apache Spark, **Exp 11A** CloudSim 5.0 Setup, **Exp 11B** CloudSim FCFS Resource Allocation, **Exp 12** CloudAnalyst.
+---
+---
 
-Target: Ubuntu 22.04 / 24.04 VM (also covers native Windows/WSL where relevant). Every block is copy-paste. Run in a normal terminal (Ctrl+Alt+T). Never paste shell commands into `scala>`, `>>>` or Eclipse.
+# PART 2: Experiments 8 to 12 on an Ubuntu VM (beginner-proof edition)
+
+**Correct experiment numbering used from here on** (same as your lab PDFs):
+
+| Exp | Topic | Section below |
+|---|---|---|
+| 8 | Hadoop 3.3.6 (HDFS + YARN + WordCount) | Section B |
+| 9 | OpenMP (9A) and MPI (9B) | Section C |
+| 10 | Apache Spark (RDD WordCount, local + HDFS) | Section D |
+| 11A | CloudSim installation | Section E |
+| 11B | CloudSim FCFS resource allocation | Section F |
+| 12 | CloudAnalyst | Section G |
+
+(An earlier draft wrongly labelled OpenMP/MPI as "8A/8B" and Hadoop as "9". Use the table above.)
+
+**How to read this part**
+- Every command block is meant to be pasted into the **Ubuntu Terminal** (`Ctrl + Alt + T`). Paste with `Ctrl + Shift + V` (plain `Ctrl + V` does not work in the terminal).
+- Lines starting with `#` are comments; pasting them is harmless.
+- When you type your password after `sudo`, **nothing appears on screen**. That is normal. Type it and press Enter.
+- Do the steps **in order**. After each "Check" block, compare your output with the "Expected" text before moving on.
+- Never run a command you do not understand twice: formatting HDFS twice or running a "setup" block twice causes the most common failures. Blocks that are unsafe to repeat are marked **RUN ONCE**.
 
 ---
 
-## A) Ubuntu VM survival kit (read first)
+## A) Ubuntu VM first-aid (do this BEFORE any experiment)
 
-### A1. Check the VM before you start
+### A0. Make life easy in VirtualBox / VMware
+- **Copy-paste between your PC and the VM (VirtualBox):** VM window menu **Devices -> Shared Clipboard -> Bidirectional**. If it does not work: **Devices -> Insert Guest Additions CD image**, then in the VM run `sudo apt install -y build-essential dkms linux-headers-$(uname -r)` and install from the CD. Restart the VM.
+- **Give the VM enough power** (shut the VM down first): VirtualBox **Settings -> System -> Motherboard -> Base Memory = 4096 MB or more**; **Processor tab -> CPUs = 2 or more** (4 if your PC has 8+ cores). Hadoop/Spark need ~4 GB; MPI/OpenMP speedup needs 2+ CPUs.
+- **Network must be NAT or Bridged:** **Settings -> Network -> Adapter 1 -> Attached to: NAT**, "Cable Connected" ticked.
+
+### A1. Terminal survival basics
+
+| Need | Do this |
+|---|---|
+| Open terminal | `Ctrl + Alt + T` (or Activities -> type "Terminal") |
+| Paste / copy in terminal | `Ctrl + Shift + V` / `Ctrl + Shift + C` |
+| Stop a running program | `Ctrl + C` |
+| Where am I? What is here? | `pwd` and `ls -l` |
+| Go to home / into a folder / up | `cd ~` / `cd foldername` / `cd ..` |
+| Edit a file with nano | `nano file.txt` -> type -> `Ctrl + O` then `Enter` (save) -> `Ctrl + X` (exit) |
+| Search command history | `Ctrl + R` then type part of the command |
+| Clear the screen | `clear` |
+
+### A2. First command of every lab session: check resources and internet
 
 ```bash
-nproc        # CPU cores (need 2+ to see OpenMP/MPI speedup)
-free -h      # RAM (Hadoop/Spark want 4 GB; run one thing at a time on 2 GB)
-df -h /      # keep at least 10 GB free
+echo "CPU cores : $(nproc)"
+free -h
+df -h /
 ping -c 2 archive.ubuntu.com
+date
 ```
 
-VirtualBox: shut the VM down, then Settings -> System -> Processor = 2 to 4 CPUs, Motherboard -> RAM = 4096 MB or more.
+Expected: cores 2 or more, "Mem" total about 3.5 GB or more, "/" has **at least 10 GB Avail**, ping shows `0% packet loss`, and `date` shows the real current date/time.
+If ping fails go to **A6 (network)**; if `date` is wrong go to **A6 (clock)**.
 
-### A2. "Could not get lock /var/lib/dpkg/lock-frontend ... held by process" (CRITICAL UBUNTU VM ISSUE)
+### A3. THE APT LOCK PROBLEM ("Could not get lock ... held by process ...")
 
-**Why this happens:** When Ubuntu boots inside a VM, background services (`unattended-upgr`, `apt-daily.service`, `packagekitd`, or the desktop "Software Updater") immediately wake up and acquire exclusive locks on `/var/lib/dpkg/lock-frontend` and `/var/lib/apt/lists/lock`. If you run `sudo apt install` while this is happening, you will get locked out and error code 100.
+**What you see**
+```text
+E: Could not get lock /var/lib/dpkg/lock-frontend. It is held by process 1234 (unattended-upgr)
+E: Unable to acquire the dpkg frontend lock (/var/lib/dpkg/lock-frontend), is another process using it?
+Waiting for cache lock: Could not get lock /var/lib/dpkg/lock-frontend ...
+```
 
-#### 🔥 EMERGENCY 10-SECOND LOCK NUKER (Copy-paste this entire single line into the terminal):
+**Why:** right after the VM boots, Ubuntu itself runs updates in the background (`unattended-upgrades`, `apt-daily`, `packagekit`, the "Software Updater" window). Only one program may use apt at a time, so your command is refused.
+
+**Fix in the correct order. Do not skip to the dangerous steps.**
+
+**Step 1: Wait (safest).** Close the "Software Updater" / "Software & Updates" window if it is open. Run:
 ```bash
-sudo killall -9 apt apt-get dpkg unattended-upgrade packagekitd 2>/dev/null; sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/apt/archives/lock /var/lib/apt/lists/lock; sudo dpkg --configure -a; sudo apt --fix-broken install -y; sudo apt update
-```
-
-#### 🛡️ PERMANENT PREVENTION (Run this once right after booting the VM so it NEVER locks again during your lab):
-```bash
-# 1. Stop background apt updaters completely
-sudo systemctl stop unattended-upgrades packagekit apt-daily.service apt-daily-upgrade.service 2>/dev/null
-sudo systemctl disable --now unattended-upgrades packagekit apt-daily.timer apt-daily-upgrade.timer 2>/dev/null
-
-# 2. Disable automatic download/upgrade in config files
-sudo sed -i 's/"1"/"0"/g' /etc/apt/apt.conf.d/20auto-upgrades 2>/dev/null || true
-sudo sed -i 's/"1"/"0"/g' /etc/apt/apt.conf.d/10periodic 2>/dev/null || true
-
-# 3. Always allow apt to wait up to 5 minutes rather than crashing instantly
-echo 'APT::Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/80retries
-echo 'DPkg::Lock::Timeout "300";' | sudo tee /etc/apt/apt.conf.d/80locktimeout
-```
-
-#### Step-by-Step Diagnostics (if you want to inspect manually):
-```bash
-# 1. See who is currently holding the lock
-ps aux | grep -E 'apt|dpkg|unattended|packagekit' | grep -v grep
-sudo fuser -v /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock
-
-# 2. Kill the process holding the lock by PID
-sudo kill -9 <PID>
-
-# 3. Remove stale lock files ONLY if no legitimate apt process is running
-sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/apt/archives/lock /var/lib/apt/lists/lock
-
-# 4. Repair dpkg database
-sudo dpkg --configure -a
-sudo apt --fix-broken install -y
-sudo apt update
-```
-
-#### Other apt/system corner failures in VM:
-- `dpkg was interrupted, you must manually run 'sudo dpkg --configure -a'` -> run `sudo dpkg --configure -a` then `sudo apt update`.
-- `Unable to locate package X` -> enable universe repository:
-  ```bash
-  sudo apt install -y software-properties-common && sudo add-apt-repository -y universe && sudo apt update
-  ```
-- `Temporary failure resolving 'archive.ubuntu.com'` -> VM has lost DNS/network.
-  VirtualBox fix: VM Settings -> Network -> Adapter 1 -> Attached to: **NAT** (ensure "Cable Connected" is checked).
-  Inside VM run:
-  ```bash
-  sudo systemctl restart systemd-resolved NetworkManager
-  echo -e "nameserver 8.8.8.8\nnameserver 1.1.1.1" | sudo tee /etc/resolv.conf
-  ping -c 2 8.8.8.8
-  ```
-- `You have held broken packages` -> `sudo apt update && sudo apt --fix-broken install -y`.
-- `No space left on device` -> VM virtual disk filled up:
-  ```bash
-  df -h /
-  sudo apt clean
-  sudo journalctl --vacuum-size=50M
-  rm -rf ~/.cache/* /tmp/*
-  ```
-- `certificate ... not yet valid` / SSL errors -> VM clock skew after pausing/resuming VM:
-  ```bash
-  sudo timedatectl set-ntp true
-  sudo systemctl restart systemd-timesyncd
-  date    # verify correct date and time
-  ```
-- `snap ... has changes in progress` -> `snap changes`, then `sudo snap abort <ID>` and retry.
-- `Permission denied` in `/opt` or `/usr/local` -> `sudo chown -R $USER:$USER <folder>`.
-- Shell environment variables missing in new terminal -> always append to `~/.bashrc` and run `source ~/.bashrc`.
-- Windows to Linux CRLF error (`\r: command not found` or syntax errors in scripts):
-  ```bash
-  sudo apt install -y dos2unix
-  dos2unix <filename>
-  # Or with sed:
-  sed -i 's/\r$//' <filename>
-  ```
-
-### A3. Install the common tools once
-
-```bash
-sudo apt update
-sudo apt install -y build-essential wget curl unzip tar git lsof nano openjdk-11-jdk
-```
-
-### A4. Switch Java without menus (use JDK 11 for everything in this part)
-
-```bash
-ls /usr/lib/jvm
-sudo update-alternatives --set java  /usr/lib/jvm/java-11-openjdk-amd64/bin/java
-sudo update-alternatives --set javac /usr/lib/jvm/java-11-openjdk-amd64/bin/javac
-java -version && javac -version     # both must say 11.x
-```
-
-ARM VM (Apple silicon): replace `amd64` with `arm64` everywhere in this sheet. Check with `dpkg --print-architecture`.
-
----
-
-## B) Exp 8A: OpenMP (shared-memory parallelism in C)
-
-### Aim
-
-Parallelise loops with OpenMP: parallel region, `parallel for` with `reduction`, race condition vs fix, `sections`, and measure speedup.
-
-### Install and verify
-
-```bash
-sudo apt install -y build-essential
-gcc --version
-echo | gcc -fopenmp -dM -E - | grep -i _OPENMP     # prints a #define _OPENMP 2018xx line
-```
-
-### `omp_demo.c` (change only the CONFIG block)
-
-```c
-#include <stdio.h>
-#include <math.h>
-#include <omp.h>
-
-// ================= CONFIG =================
-#define N        50000000L   // loop size (raise it if speedup is not visible)
-#define THREADS  4           // threads to use
-#define ITER     200000      // iterations for the race-condition demo
-// ==========================================
-
-int main(void) {
-    omp_set_num_threads(THREADS);
-    printf("Cores: %d | Max threads: %d\n", omp_get_num_procs(), omp_get_max_threads());
-
-    /* 1. Parallel region */
-    #pragma omp parallel
-    printf("Hello from thread %d of %d\n", omp_get_thread_num(), omp_get_num_threads());
-
-    /* 2. Serial vs parallel for + reduction */
-    double t0 = omp_get_wtime(), s1 = 0.0;
-    for (long i = 1; i <= N; i++) s1 += sqrt((double)i);
-    double t1 = omp_get_wtime(), s2 = 0.0;
-    #pragma omp parallel for reduction(+:s2)
-    for (long i = 1; i <= N; i++) s2 += sqrt((double)i);
-    double t2 = omp_get_wtime();
-    printf("Serial   : %.4f s  sum=%.2f\n", t1 - t0, s1);
-    printf("Parallel : %.4f s  sum=%.2f\n", t2 - t1, s2);
-    printf("Speedup  : %.2fx\n", (t1 - t0) / (t2 - t1));
-
-    /* 3. Race condition vs fixes */
-    long bad = 0, atom = 0, good = 0;
-    #pragma omp parallel for
-    for (int i = 0; i < ITER; i++) bad++;                 // WRONG: data race
-    #pragma omp parallel for
-    for (int i = 0; i < ITER; i++) {
-        #pragma omp atomic
-        atom++;                                           // correct, slower
-    }
-    #pragma omp parallel for reduction(+:good)
-    for (int i = 0; i < ITER; i++) good++;                // correct, fastest
-    printf("Expected %d | unsafe=%ld atomic=%ld reduction=%ld\n", ITER, bad, atom, good);
-
-    /* 4. Sections (task parallelism) */
-    #pragma omp parallel sections
-    {
-        #pragma omp section
-        printf("Section A on thread %d\n", omp_get_thread_num());
-        #pragma omp section
-        printf("Section B on thread %d\n", omp_get_thread_num());
-    }
-    return 0;
-}
-```
-
-### Compile and run
-
-```bash
-gcc -fopenmp -O2 omp_demo.c -o omp_demo -lm
-./omp_demo
-```
-
-The flags must be exactly in this order (`-lm` last). Expected: threads print in random order (normal), parallel time lower than serial, `unsafe` count usually below 200000, `atomic` and `reduction` exactly 200000.
-
-Speedup table for the record (tries 1, 2, 4, 8 threads):
-
-```bash
-for t in 1 2 4 8; do
-  sed -i "s/#define THREADS .*/#define THREADS  $t/" omp_demo.c
-  gcc -fopenmp -O2 omp_demo.c -o omp_demo -lm && echo "== $t threads" && ./omp_demo | grep -E 'Serial|Parallel|Speedup'
+# waits until the background update finishes (up to ~5 minutes), then tells you
+for i in $(seq 1 60); do
+  if sudo fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock >/dev/null 2>&1; then
+    echo "apt is busy... waiting ($i/60)"; sleep 5
+  else
+    echo "apt is FREE. You can run your install command now."; break
+  fi
 done
 ```
+If it ends with "apt is FREE", just run your `sudo apt install ...` again.
 
-### If it fails
-
-- `fatal error: omp.h: No such file or directory` -> `sudo apt install -y build-essential`, check `gcc --version`.
-- `undefined reference to GOMP_parallel` or `omp_get_thread_num` -> `-fopenmp` missing at compile/link.
-- `undefined reference to sqrt` -> put `-lm` after the source file.
-- Every line says "thread 0 of 1" -> `-fopenmp` missing (pragmas are silently ignored).
-- Speedup about 1x or below 1x -> `nproc` shows 1 core (fix VM CPUs, see A1), or N too small (raise N).
-- Setting `OMP_NUM_THREADS=2` has no effect -> the code calls `omp_set_num_threads(THREADS)`, which overrides it. Change `THREADS` instead.
-- `Permission denied` when running -> `chmod +x omp_demo`; `command not found` -> use `./omp_demo`.
-- Strange characters/compile errors after copying from Windows -> `sed -i 's/\r$//' omp_demo.c`.
-
----
-
-## C) Exp 8B: MPI (message passing, OpenMPI)
-
-### Aim
-
-Run several processes that communicate: rank/size, Send/Recv, Bcast, Scatter, Reduce, and a parallel pi calculation.
-
-### Install and verify
-
+**Step 2: Make apt wait by itself (works for the rest of the day).** Run once:
 ```bash
-sudo apt install -y openmpi-bin libopenmpi-dev
-mpicc --version
-mpirun --version       # Open MPI 4.x
+echo 'DPkg::Lock::Timeout "300";' | sudo tee /etc/apt/apt.conf.d/80locktimeout
 ```
+From now on `sudo apt install ...` waits up to 5 minutes instead of failing immediately.
 
-### `mpi_demo.c`
-
-```c
-#include <mpi.h>
-#include <stdio.h>
-#include <stdlib.h>
-
-// ================= CONFIG =================
-#define PER_PROC 4            // elements per process in Scatter
-#define STEPS    100000000L   // intervals for the pi integration
-// ==========================================
-
-int main(int argc, char **argv) {
-    int rank, size, len;
-    char host[MPI_MAX_PROCESSOR_NAME];
-    MPI_Init(&argc, &argv);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
-    MPI_Get_processor_name(host, &len);
-    printf("Hello from rank %d of %d on %s\n", rank, size, host);
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    /* 1. Point-to-point */
-    if (size >= 2) {
-        if (rank == 0) {
-            int msg = 100;
-            MPI_Send(&msg, 1, MPI_INT, 1, 0, MPI_COMM_WORLD);
-            printf("Rank 0 sent %d to rank 1\n", msg);
-        } else if (rank == 1) {
-            int msg;
-            MPI_Recv(&msg, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            printf("Rank 1 received %d from rank 0\n", msg);
-        }
-    }
-
-    /* 2. Broadcast */
-    int value = (rank == 0) ? 42 : 0;
-    MPI_Bcast(&value, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    printf("Rank %d has broadcast value %d\n", rank, value);
-
-    /* 3. Scatter + Reduce */
-    int *all = NULL, local[PER_PROC], part = 0, total = 0;
-    if (rank == 0) {
-        all = malloc(size * PER_PROC * sizeof(int));
-        for (int i = 0; i < size * PER_PROC; i++) all[i] = i + 1;
-    }
-    MPI_Scatter(all, PER_PROC, MPI_INT, local, PER_PROC, MPI_INT, 0, MPI_COMM_WORLD);
-    for (int i = 0; i < PER_PROC; i++) part += local[i];
-    MPI_Reduce(&part, &total, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
-    if (rank == 0) {
-        int n = size * PER_PROC;
-        printf("Sum 1..%d = %d (expected %d)\n", n, total, n * (n + 1) / 2);
-        free(all);
-    }
-
-    /* 4. Pi by numerical integration */
-    double t0 = MPI_Wtime(), h = 1.0 / (double)STEPS, local_sum = 0.0, pi = 0.0;
-    for (long i = rank; i < STEPS; i += size) {
-        double x = h * ((double)i + 0.5);
-        local_sum += 4.0 / (1.0 + x * x);
-    }
-    local_sum *= h;
-    MPI_Reduce(&local_sum, &pi, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-    if (rank == 0) printf("Pi = %.12f  time = %.3f s with %d processes\n", pi, MPI_Wtime() - t0, size);
-
-    MPI_Finalize();
-    return 0;
+**Step 3: If still stuck after 5 minutes: the automatic repair script** (creates a script once, then runs it). This kills only apt-related processes, removes stale locks only when nobody owns them, and repairs interrupted installs.
+```bash
+cat > ~/fixapt.sh <<'EOF'
+#!/bin/bash
+LOCKS="/var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock"
+busy() {
+  if command -v fuser >/dev/null 2>&1; then sudo fuser $LOCKS >/dev/null 2>&1
+  else sudo lsof $LOCKS >/dev/null 2>&1; fi
 }
+echo "[1/5] Processes using apt/dpkg right now:"
+ps -eo pid,etime,cmd | grep -E 'apt|dpkg|unattended|packagekit|update-manager' | grep -v grep || echo "   none"
+
+echo "[2/5] Stopping background updaters..."
+sudo systemctl stop unattended-upgrades apt-daily.service apt-daily-upgrade.service packagekit 2>/dev/null
+sleep 3
+if busy; then
+  echo "   still locked -> force-killing apt-related processes"
+  sudo pkill -9 -f unattended-upgrade 2>/dev/null
+  for p in apt apt-get dpkg aptd packagekitd update-manager; do sudo pkill -9 -x "$p" 2>/dev/null; done
+  sleep 2
+fi
+
+echo "[3/5] Removing stale lock files (only if nobody holds them)..."
+if busy; then
+  echo "   a process STILL holds a lock. Run:  sudo fuser -v $LOCKS   then   sudo kill -9 PID"
+  exit 1
+fi
+sudo rm -f $LOCKS
+
+echo "[4/5] Repairing interrupted installs..."
+sudo dpkg --configure -a
+sudo apt-get install -f -y
+
+echo "[5/5] Refreshing package lists..."
+sudo apt-get update
+echo "DONE. Now run your install command again."
+EOF
+chmod +x ~/fixapt.sh
+bash ~/fixapt.sh
 ```
+Keep this script. Any time apt complains, run `bash ~/fixapt.sh` again.
 
-### Compile and run
-
+**Step 4 (optional but recommended): stop the VM from updating in the background during the lab.** Run once after the VM boots:
 ```bash
-mpicc mpi_demo.c -o mpi_demo -lm
-mpirun -np 4 ./mpi_demo
-# more processes than cores (needed on a 2-core VM for -np 4 or more):
-mpirun --oversubscribe -np 8 ./mpi_demo
-# compare timings for the record
-for p in 1 2 4; do mpirun --oversubscribe -np $p ./mpi_demo | grep Pi; done
+sudo systemctl stop unattended-upgrades packagekit apt-daily.timer apt-daily-upgrade.timer 2>/dev/null
+sudo systemctl disable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer 2>/dev/null
+sudo sed -i 's/"1"/"0"/g' /etc/apt/apt.conf.d/20auto-upgrades 2>/dev/null
+echo 'APT::Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/80retries
+```
+(To undo later: `sudo systemctl enable unattended-upgrades apt-daily.timer apt-daily-upgrade.timer`.)
+
+**Manual diagnosis (only if the script says a process still holds the lock):**
+```bash
+sudo fuser -v /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock
+sudo kill -9 PID_NUMBER_SHOWN_ABOVE
+sudo dpkg --configure -a
 ```
 
-### If it fails
+### A4. Other apt / package errors and their one-line fixes
 
-- `mpicc: command not found` -> `sudo apt install -y openmpi-bin libopenmpi-dev`, then open a new terminal.
-- `There are not enough slots available in the system` -> add `--oversubscribe`, or lower `-np` to the `nproc` value.
-- `mpirun has detected an attempt to run as root` -> you are in `sudo -i`/root shell. Use your normal user. Last resort: `mpirun --allow-run-as-root -np 4 ./mpi_demo`.
-- `mpicc` works but `mpirun` errors / version mismatch (MPICH and OpenMPI both installed) -> `sudo update-alternatives --config mpirun` and `--config mpicc`, pick the same MPI for both.
-- `error while loading shared libraries: libmpi.so` -> `sudo ldconfig`, or reinstall `libopenmpi-dev`.
-- Warnings about `vader`, `CMA`, `Read -1, expected` -> `export OMPI_MCA_btl_vader_single_copy_mechanism=none` then rerun.
-- Hangs forever -> a Send without a matching Recv (rank numbers), or you ran with `-np 1` while the code needs 2 ranks. Press Ctrl+C.
-- Network/interface warnings and slow start in a VM -> `mpirun --mca btl_tcp_if_include lo -np 4 ./mpi_demo`.
-- Output lines mixed up or in random order -> normal for MPI (processes print independently).
-- Segmentation fault in Scatter -> `PER_PROC` and the receive buffer size must match.
+| Error text | Meaning | Fix |
+|---|---|---|
+| `E: Could not open lock file ... (13: Permission denied)` | You forgot `sudo` | Re-run with `sudo` in front |
+| `dpkg was interrupted, you must manually run 'sudo dpkg --configure -a'` | A previous install was cut off | `sudo dpkg --configure -a && sudo apt-get install -f -y` |
+| `E: Unable to locate package xyz` | Package lists empty or "universe" repo off | `sudo apt update`; if still missing: `sudo apt install -y software-properties-common && sudo add-apt-repository -y universe && sudo apt update` |
+| `Temporary failure resolving 'archive.ubuntu.com'` | No DNS / network | See A6 |
+| `Hash Sum mismatch` or `File has unexpected size` | Corrupt cached lists | `sudo rm -rf /var/lib/apt/lists/* && sudo apt update` |
+| `NO_PUBKEY ...` / `GPG error` | Repository key missing | Check the system date (A6); remove the bad repo from `/etc/apt/sources.list.d/` |
+| `E: You have held broken packages` / `Unmet dependencies` | Half-installed packages | `sudo apt --fix-broken install -y && sudo apt update && sudo apt full-upgrade -y` |
+| `404 Not Found [IP: ...]` while installing | Old package list | `sudo apt update` then retry |
+| `No space left on device` | Virtual disk full | `df -h /`, then `sudo apt clean; sudo journalctl --vacuum-size=50M; rm -rf ~/.cache/*` |
+| `username is not in the sudoers file` | Your user has no sudo rights | `su -` (root password), then `usermod -aG sudo YOUR_USERNAME`, log out and in |
+| `snap ... has changes in progress` | Another snap job running | `snap changes`, wait, or `sudo snap abort ID` |
+| `bash: syntax error` / `\r: command not found` after copying a file from Windows | Windows line endings | `sed -i 's/\r$//' filename` |
+| `Permission denied` writing in `/usr/local/...` | Folder owned by root | `sudo chown -R $USER:$USER /usr/local/FOLDER` |
+
+### A5. Low-RAM VM? Add swap (prevents "Cannot allocate memory", frozen Hadoop/Spark/Eclipse)
+```bash
+free -h | grep -i swap               # if Swap total is 0B you have none
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+free -h | grep -i swap               # should now show 2.0Gi
+```
+(Run once. It disappears after reboot unless you add `/swapfile none swap sw 0 0` to `/etc/fstab`; not needed for a single lab.)
+
+### A6. Network and clock problems
+```bash
+ping -c 2 8.8.8.8            # works  -> internet OK, DNS is the problem
+ping -c 2 archive.ubuntu.com # fails  -> DNS problem
+```
+DNS fix:
+```bash
+sudo systemctl restart systemd-resolved NetworkManager
+printf 'nameserver 8.8.8.8\nnameserver 1.1.1.1\n' | sudo tee /etc/resolv.conf
+ping -c 2 archive.ubuntu.com
+```
+If even `ping 8.8.8.8` fails: shut down the VM, VirtualBox **Settings -> Network -> Adapter 1 -> NAT**, tick **Cable Connected**, start again.
+
+Wrong date/time (causes `certificate is not yet valid` and download errors, common after pausing the VM):
+```bash
+sudo timedatectl set-ntp true
+sudo systemctl restart systemd-timesyncd
+sleep 5; date
+```
+
+### A7. Install the base tools (safe to run again)
+```bash
+sudo apt update
+sudo apt install -y build-essential wget curl unzip tar git nano lsof psmisc net-tools openjdk-11-jdk openssh-server maven python3 python3-pip
+```
+
+### A8. Use Java 11 for all of Part 2
+```bash
+ls /usr/lib/jvm                      # shows installed JDK folders
+dpkg --print-architecture           # amd64 (normal PC) or arm64 (Apple M1/M2 VM)
+sudo update-alternatives --set java  /usr/lib/jvm/java-11-openjdk-$(dpkg --print-architecture)/bin/java
+sudo update-alternatives --set javac /usr/lib/jvm/java-11-openjdk-$(dpkg --print-architecture)/bin/javac
+java -version
+javac -version
+```
+Expected: both say `11.0.x`. If `update-alternatives` says "no alternatives for java-11", JDK 11 is not installed: `sudo apt install -y openjdk-11-jdk`.
+Interactive alternative: `sudo update-alternatives --config java` then type the number of the Java 11 line and press Enter.
+
+### A9. The helper that stops duplicate lines in `~/.bashrc`
+`~/.bashrc` holds your environment variables. Pasting the same `export` lines twice is harmless but messy; this helper adds a line only if it is not already there. Paste it once **in each new terminal** before using it:
+```bash
+addline() { grep -qxF "$1" ~/.bashrc || echo "$1" >> ~/.bashrc; }
+```
+Reload changes in the current terminal with `source ~/.bashrc`. Opening a new terminal also loads them.
+
+### A10. One command that reports everything installed (run any time, also the night before the lab)
+```bash
+cat > ~/labcheck.sh <<'EOF'
+#!/bin/bash
+check() { local c="$1"; shift
+  if command -v "$c" >/dev/null 2>&1; then echo "[OK]      $c : $("$@" 2>&1 | head -n 1)"
+  else echo "[MISSING] $c"; fi; }
+echo "=========== TOOLS ==========="
+check java java -version
+check javac javac -version
+check git git --version
+check mvn mvn -v
+check python3 python3 --version
+check gcc gcc --version
+check mpicc mpicc --version
+check mpirun mpirun --version
+check hadoop hadoop version
+check spark-submit bash -c "spark-submit --version 2>&1 | grep -m1 -i 'version'"
+echo "=========== GUI IDEs ==========="
+snap list 2>/dev/null | grep -Ei 'eclipse|netbeans' || echo "[MISSING] eclipse / netbeans (snap)"
+echo "=========== ENV VARIABLES ==========="
+echo "JAVA_HOME   = ${JAVA_HOME:-<not set>}"
+echo "HADOOP_HOME = ${HADOOP_HOME:-<not set>}"
+echo "SPARK_HOME  = ${SPARK_HOME:-<not set>}"
+echo "=========== RUNNING JAVA DAEMONS (jps) ==========="
+jps 2>/dev/null || echo "jps not found (JDK missing)"
+echo "=========== SSH / DISK / RAM ==========="
+systemctl is-active ssh
+df -h / | tail -n 1
+free -h | sed -n 2p
+EOF
+chmod +x ~/labcheck.sh
+bash ~/labcheck.sh
+```
+`[MISSING]` lines tell you exactly what to install. `HADOOP_HOME = <not set>` right after installing means you forgot `source ~/.bashrc`.
 
 ---
 
-## D) Exp 9: Hadoop 3.3.6 (single node, HDFS + YARN + WordCount)
+## B) Experiment 8: Hadoop 3.3.6 (single-node: HDFS + YARN + WordCount)
 
 ### Aim
+Install Hadoop 3.x in pseudo-distributed mode on one machine, start HDFS and YARN, store files in HDFS and run a MapReduce WordCount job.
 
-Set up a pseudo-distributed Hadoop cluster on one Ubuntu VM, store files in HDFS and run a MapReduce WordCount.
+### B0. "Is Hadoop already installed?" (CHECK FIRST, do not reinstall blindly)
+```bash
+echo "JAVA_HOME   = $JAVA_HOME"
+echo "HADOOP_HOME = $HADOOP_HOME"
+command -v hadoop || echo "hadoop command NOT found"
+hadoop version 2>&1 | head -n 1
+ls -d /usr/local/hadoop* /opt/hadoop* ~/hadoop* 2>/dev/null
+ls ~/hadoopdata 2>/dev/null
+grep -n "HADOOP\|JAVA_HOME" ~/.bashrc
+systemctl is-active ssh
+jps
+ss -tulpn 2>/dev/null | grep -E ':9000|:9870|:8088'
+```
 
-### D1. Java and SSH
+| What you see | What it means | What to do |
+|---|---|---|
+| `Hadoop 3.3.6` printed **and** `jps` lists NameNode, DataNode, SecondaryNameNode, ResourceManager, NodeManager | Everything is already running | Skip to **B7** (HDFS commands) |
+| `Hadoop 3.x` printed but `jps` shows only `Jps` | Installed, just stopped (normal after reboot) | `start-dfs.sh` then `start-yarn.sh` then `jps` (**never format again**) |
+| `hadoop command NOT found` but `/usr/local/hadoop` exists | Install is fine, environment lines missing | Do **B4** only, then `source ~/.bashrc` |
+| `hadoop command NOT found` and no folder | Not installed | Start at **B1** |
+| A different version (e.g. 3.3.4 / 3.4.0) works | Fine; commands are identical | Use the wildcard jar name shown in B7; skip install |
+| `~/hadoopdata` or `/usr/local/hadoop/hadoop_data` already exists | Already formatted once | Do **not** run `hdfs namenode -format` again unless a failure fix tells you to |
+| `jps` shows some but not all 5 daemons | Partial start | Go to **B10 (Fail fixes)** |
+| `JAVA_HOME` empty but `hadoop version` works | Normal; Hadoop reads JAVA_HOME from `hadoop-env.sh` | Nothing to do |
 
+### B1. Packages (Java 11 + SSH)
+If apt says "Could not get lock", go to **A3** first.
 ```bash
 sudo apt update
 sudo apt install -y openjdk-11-jdk openssh-server openssh-client wget tar
 sudo systemctl enable --now ssh
-systemctl status ssh --no-pager | head -n 5      # must show active (running)
+systemctl is-active ssh
+java -version
 ```
+Expected: `active` and `openjdk version "11.0.x"`. Do **not** install `pdsh`; it breaks `start-dfs.sh`.
+If `java -version` shows 17 or 21, do **A8**.
 
-Do NOT install `pdsh` (it breaks start-dfs.sh).
-
-### D2. Passwordless SSH to localhost
-
+### B2. Passwordless SSH to localhost (Hadoop starts its daemons through SSH)
 ```bash
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
 [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -P "" -f ~/.ssh/id_ed25519
-cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
+grep -qF "$(cat ~/.ssh/id_ed25519.pub)" ~/.ssh/authorized_keys 2>/dev/null || cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
 chmod 600 ~/.ssh/authorized_keys
-ssh-keyscan -H localhost 0.0.0.0 127.0.0.1 >> ~/.ssh/known_hosts 2>/dev/null
-ssh localhost 'echo SSH OK'       # must print SSH OK without asking for a password
+chmod go-w ~
+ssh-keyscan -H localhost 127.0.0.1 0.0.0.0 >> ~/.ssh/known_hosts 2>/dev/null
+ssh -o BatchMode=yes localhost 'echo SSH-OK'
 ```
+Expected last line: `SSH-OK` with **no password prompt**. If it asks for a password or fails, see **B10 (SSH problems)**.
 
-### D3. Download and place Hadoop
-
+### B3. Download and place Hadoop (about 700 MB: needs 3 GB free disk and a few minutes)
 ```bash
 cd ~
 wget -c https://archive.apache.org/dist/hadoop/common/hadoop-3.3.6/hadoop-3.3.6.tar.gz
+ls -lh hadoop-3.3.6.tar.gz              # should be roughly 690-730 MB
+tar -tzf hadoop-3.3.6.tar.gz > /dev/null && echo "ARCHIVE OK"
+```
+Only if you see `ARCHIVE OK`:
+```bash
 tar -xzf hadoop-3.3.6.tar.gz
+sudo rm -rf /usr/local/hadoop              # removes an older failed install, if any
 sudo mv hadoop-3.3.6 /usr/local/hadoop
 sudo chown -R $USER:$USER /usr/local/hadoop
+ls /usr/local/hadoop
 ```
+Expected: folders `bin etc lib libexec sbin share ...`.
+`wget` stopped halfway? Run the same `wget -c` line again; it resumes. `unexpected end of file` means a broken download: `rm hadoop-3.3.6.tar.gz` and download again.
 
-`gzip: stdin: unexpected end of file` means a partial download: `rm hadoop-3.3.6.tar.gz` and run `wget -c` again (or download the same URL in Firefox).
-
-### D4. Environment (run this block ONCE; running twice duplicates lines)
-
+### B4. Environment variables (safe to repeat; uses the helper from A9)
 ```bash
-cat >> ~/.bashrc <<'EOF'
-export HADOOP_HOME=/usr/local/hadoop
-export HADOOP_CONF_DIR=$HADOOP_HOME/etc/hadoop
-export PATH=$PATH:$HADOOP_HOME/bin:$HADOOP_HOME/sbin
-export PDSH_RCMD_TYPE=ssh
-EOF
+addline() { grep -qxF "$1" ~/.bashrc || echo "$1" >> ~/.bashrc; }
+addline 'export HADOOP_HOME=/usr/local/hadoop'
+addline 'export HADOOP_CONF_DIR=$HADOOP_HOME/etc/hadoop'
+addline 'export PATH=$PATH:$HADOOP_HOME/bin:$HADOOP_HOME/sbin'
+addline 'export PDSH_RCMD_TYPE=ssh'
 source ~/.bashrc
 
-cat >> $HADOOP_HOME/etc/hadoop/hadoop-env.sh <<EOF
-export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-$(dpkg --print-architecture)
-export HADOOP_SSH_OPTS="-o StrictHostKeyChecking=no"
-EOF
+JH=/usr/lib/jvm/java-11-openjdk-$(dpkg --print-architecture)
+ls -d $JH || echo "JDK 11 folder not found: run  ls /usr/lib/jvm  and use that folder name below"
+grep -q '^export JAVA_HOME=' $HADOOP_HOME/etc/hadoop/hadoop-env.sh \
+  && sed -i "s|^export JAVA_HOME=.*|export JAVA_HOME=$JH|" $HADOOP_HOME/etc/hadoop/hadoop-env.sh \
+  || echo "export JAVA_HOME=$JH" >> $HADOOP_HOME/etc/hadoop/hadoop-env.sh
+echo 'export HADOOP_SSH_OPTS="-o StrictHostKeyChecking=no"' >> $HADOOP_HOME/etc/hadoop/hadoop-env.sh
 
-ls $JAVA_HOME 2>/dev/null; ls /usr/lib/jvm      # confirm the java-11 folder name matches
-hadoop version                                  # first line: Hadoop 3.3.6
+hadoop version | head -n 1
+grep -n '^export JAVA_HOME' $HADOOP_HOME/etc/hadoop/hadoop-env.sh
+```
+Expected: `Hadoop 3.3.6` and a `JAVA_HOME=/usr/lib/jvm/java-11-openjdk-...` line.
+(JAVA_HOME is written **inside `hadoop-env.sh`** on purpose: the daemons start through SSH and do not read `.bashrc`.)
+If you are logged in as **root** (prompt shows `root@`): also run
+```bash
+cat >> $HADOOP_HOME/etc/hadoop/hadoop-env.sh <<'EOF'
+export HDFS_NAMENODE_USER=root
+export HDFS_DATANODE_USER=root
+export HDFS_SECONDARYNAMENODE_USER=root
+export YARN_RESOURCEMANAGER_USER=root
+export YARN_NODEMANAGER_USER=root
+EOF
 ```
 
-JAVA\_HOME is set inside `hadoop-env.sh` on purpose: the daemons are started over SSH and do not read `.bashrc`.
-
-### D5. Configuration files (copy the whole block)
-
+### B5. Configuration files (RUN the whole block; it overwrites the four files safely)
 ```bash
 mkdir -p ~/hadoopdata/namenode ~/hadoopdata/datanode ~/hadoopdata/tmp
 cd $HADOOP_HOME/etc/hadoop
 
 cat > core-site.xml <<EOF
-<?xml version="1.0"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <configuration>
   <property><name>fs.defaultFS</name><value>hdfs://localhost:9000</value></property>
   <property><name>hadoop.tmp.dir</name><value>$HOME/hadoopdata/tmp</value></property>
@@ -1838,7 +1810,7 @@ cat > core-site.xml <<EOF
 EOF
 
 cat > hdfs-site.xml <<EOF
-<?xml version="1.0"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <configuration>
   <property><name>dfs.replication</name><value>1</value></property>
   <property><name>dfs.namenode.name.dir</name><value>file:$HOME/hadoopdata/namenode</value></property>
@@ -1847,7 +1819,7 @@ cat > hdfs-site.xml <<EOF
 EOF
 
 cat > mapred-site.xml <<'EOF'
-<?xml version="1.0"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <configuration>
   <property><name>mapreduce.framework.name</name><value>yarn</value></property>
   <property><name>mapreduce.application.classpath</name><value>/usr/local/hadoop/share/hadoop/mapreduce/*:/usr/local/hadoop/share/hadoop/mapreduce/lib/*</value></property>
@@ -1858,30 +1830,51 @@ cat > mapred-site.xml <<'EOF'
 EOF
 
 cat > yarn-site.xml <<'EOF'
-<?xml version="1.0"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <configuration>
   <property><name>yarn.nodemanager.aux-services</name><value>mapreduce_shuffle</value></property>
   <property><name>yarn.nodemanager.env-whitelist</name><value>JAVA_HOME,HADOOP_COMMON_HOME,HADOOP_HDFS_HOME,HADOOP_CONF_DIR,CLASSPATH_PREPEND_DISTCACHE,HADOOP_YARN_HOME,HADOOP_HOME,PATH,LANG,TZ,HADOOP_MAPRED_HOME</value></property>
   <property><name>yarn.nodemanager.vmem-check-enabled</name><value>false</value></property>
 </configuration>
 EOF
-
 cd ~
 ```
-
-### D6. Format (ONLY the first time) and start
-
+Check the files are readable XML (optional):
 ```bash
-hdfs namenode -format          # look for: has been successfully formatted
+sudo apt install -y libxml2-utils
+for f in core hdfs mapred yarn; do xmllint --noout $HADOOP_HOME/etc/hadoop/$f-site.xml && echo "$f-site.xml OK"; done
+```
+Four lines ending in `OK` expected. If you installed Hadoop in another folder (not `/usr/local/hadoop`), change the two `mapred-site.xml` paths.
+The lab sheet may tell you to `cp mapred-site.xml.template`. In Hadoop 3.x that template does **not** exist; `mapred-site.xml` is already there, and the block above replaces it.
+
+### B6. Format (FIRST TIME ONLY) and start
+```bash
+hdfs namenode -format
+```
+Look for `has been successfully formatted` near the end. **RUN ONCE.** Formatting again later erases everything in HDFS and causes the "Incompatible clusterIDs" error.
+```bash
 start-dfs.sh
 start-yarn.sh
 jps
 ```
+Expected `jps` (numbers differ):
+```text
+2301 NameNode
+2455 DataNode
+2677 SecondaryNameNode
+2890 ResourceManager
+3011 NodeManager
+3355 Jps
+```
+All 5 daemons must be present. Extra checks:
+```bash
+hdfs dfsadmin -report | head -n 20          # "Live datanodes (1)"
+```
+Open in the VM's Firefox: `http://localhost:9870` (HDFS) and `http://localhost:8088` (YARN). Take screenshots for the record.
 
-`jps` must list: **NameNode, DataNode, SecondaryNameNode, ResourceManager, NodeManager** (plus Jps). Web pages (Firefox in the VM): http://localhost:9870 (HDFS) and http://localhost:8088 (YARN). After every VM reboot just run `start-dfs.sh` and `start-yarn.sh` again. NEVER format again unless something is broken (it deletes your HDFS data).
+**After every VM reboot** you only need: `start-dfs.sh && start-yarn.sh && jps`.
 
-### D7. HDFS commands and WordCount (example jar)
-
+### B7. HDFS commands and the built-in WordCount
 ```bash
 mkdir -p ~/wc_input
 printf 'hello cloud hello hadoop\nbig data in the cloud\n' > ~/wc_input/a.txt
@@ -1890,14 +1883,42 @@ hdfs dfs -mkdir -p /user/$USER
 hdfs dfs -put -f ~/wc_input /user/$USER/input
 hdfs dfs -ls /user/$USER/input
 
-hadoop jar $HADOOP_HOME/share/hadoop/mapreduce/hadoop-mapreduce-examples-3.3.6.jar wordcount /user/$USER/input /user/$USER/output
+EXJAR=$(ls $HADOOP_HOME/share/hadoop/mapreduce/hadoop-mapreduce-examples-*.jar)
+echo "$EXJAR"
+hadoop jar $EXJAR wordcount /user/$USER/input /user/$USER/output
 hdfs dfs -cat /user/$USER/output/part-r-00000
 ```
+Expected output:
+```text
+big     1
+cloud   2
+data    1
+hadoop  1
+hello   2
+in      1
+the     1
+```
+The job prints `map 100% reduce 100%` and `Job ... completed successfully`.
+Running again needs a **new/empty output folder**: `hdfs dfs -rm -r /user/$USER/output`.
 
-Re-running needs a fresh output folder: `hdfs dfs -rm -r /user/$USER/output`. Other handy commands: `hdfs dfs -get`, `-cat`, `-rm`, `-du -h`, `hdfs dfsadmin -report`.
+Useful HDFS commands for viva/record:
+```bash
+hdfs dfs -ls /                       # list root
+hdfs dfs -cat /user/$USER/input/a.txt
+hdfs dfs -get /user/$USER/output/part-r-00000 ~/result.txt     # copy to Linux
+hdfs dfs -du -h /user/$USER
+hdfs dfs -rm -r /user/$USER/output
+hdfs dfs -rm -f /user/$USER/input/a.txt
+hdfs dfsadmin -report
+hdfs fsck / -files -blocks | tail -n 15
+```
 
-### D8. Your own WordCount.java (if the question asks you to write the code)
-
+### B8. Your own WordCount.java (when the question asks you to write the code)
+```bash
+mkdir -p ~/wc_java && cd ~/wc_java
+nano WordCount.java
+```
+Paste:
 ```java
 import java.io.IOException;
 import java.util.StringTokenizer;
@@ -1912,6 +1933,7 @@ import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 
 public class WordCount {
+
   public static class TokenizerMapper extends Mapper<Object, Text, Text, IntWritable> {
     private final static IntWritable one = new IntWritable(1);
     private Text word = new Text();
@@ -1920,6 +1942,7 @@ public class WordCount {
       while (itr.hasMoreTokens()) { word.set(itr.nextToken()); context.write(word, one); }
     }
   }
+
   public static class IntSumReducer extends Reducer<Text, IntWritable, Text, IntWritable> {
     private IntWritable result = new IntWritable();
     public void reduce(Text key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
@@ -1929,7 +1952,9 @@ public class WordCount {
       context.write(key, result);
     }
   }
+
   public static void main(String[] args) throws Exception {
+    if (args.length < 2) { System.err.println("Usage: WordCount <input> <output>"); System.exit(2); }
     Job job = Job.getInstance(new Configuration(), "word count");
     job.setJarByClass(WordCount.class);
     job.setMapperClass(TokenizerMapper.class);
@@ -1943,311 +1968,793 @@ public class WordCount {
   }
 }
 ```
-
+Save (`Ctrl + O`, Enter, `Ctrl + X`), then compile and run:
 ```bash
-mkdir -p wc_classes
-javac -classpath "$(hadoop classpath)" -d wc_classes WordCount.java
-jar -cvf wc.jar -C wc_classes/ .
+mkdir -p classes
+javac -classpath "$(hadoop classpath)" -d classes WordCount.java
+jar -cvf wc.jar -C classes/ .
+hdfs dfs -rm -r -f /user/$USER/output2
 hadoop jar wc.jar WordCount /user/$USER/input /user/$USER/output2
 hdfs dfs -cat /user/$USER/output2/part-r-00000
+cd ~
 ```
+`javac: invalid target release` or `class file version` errors mean Java is not 11: do **A8**.
 
-### D9. Stop, and a no-daemon fallback
-
+### B9. Stop, restart, and a no-daemon fallback
 ```bash
 stop-yarn.sh
 stop-dfs.sh
+jps                      # only Jps should remain
 ```
-
-If the cluster refuses to start and time is short, run WordCount locally (no HDFS/YARN needed):
-
+If the cluster will not start and time is short, run WordCount on the local disk without HDFS/YARN (proves the MapReduce logic; say so in your record):
 ```bash
-hadoop jar $HADOOP_HOME/share/hadoop/mapreduce/hadoop-mapreduce-examples-3.3.6.jar wordcount -D mapreduce.framework.name=local -D fs.defaultFS=file:/// ~/wc_input ~/wc_output_local
+EXJAR=$(ls $HADOOP_HOME/share/hadoop/mapreduce/hadoop-mapreduce-examples-*.jar)
+rm -rf ~/wc_output_local
+hadoop jar $EXJAR wordcount -D mapreduce.framework.name=local -D fs.defaultFS=file:/// ~/wc_input ~/wc_output_local
 cat ~/wc_output_local/part-r-00000
 ```
 
-### If it fails (Hadoop)
+### B10. Hadoop failure fixes (find your message, run the fix)
 
-- `ssh: connect to host localhost port 22: Connection refused` -> `sudo systemctl enable --now ssh`.
-- `Permission denied (publickey)` -> `chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys; chmod go-w ~`, then redo D2.
-- `pdsh@...: rcmd: socket: Permission denied` -> `export PDSH_RCMD_TYPE=ssh` (or `sudo apt remove -y pdsh`), then `start-dfs.sh`.
-- `Are you sure you want to continue connecting` loops/prompts at start-dfs -> redo the `ssh-keyscan` line in D2.
-- `Error: JAVA_HOME is not set` / `does not exist` -> `nano $HADOOP_HOME/etc/hadoop/hadoop-env.sh`, fix the `JAVA_HOME=` line to a folder shown by `ls /usr/lib/jvm`.
-- `hadoop: command not found` -> `source ~/.bashrc`; check `echo $HADOOP_HOME`.
-- `jps: command not found` -> you have only the JRE: `sudo apt install -y openjdk-11-jdk`.
-- NameNode missing in `jps` -> `tail -n 40 $HADOOP_HOME/logs/hadoop-*-namenode-*.log`. Usually not formatted (run `hdfs namenode -format`) or port 9000 busy.
-- DataNode missing, log says `Incompatible clusterIDs` (happens after a second format) -> clean restart:
+**1. `ssh: connect to host localhost port 22: Connection refused`**
+```bash
+sudo apt install -y openssh-server
+sudo systemctl enable --now ssh
+systemctl status ssh --no-pager | head -n 5
+```
 
+**2. `Permission denied (publickey)` or SSH asks for a password**
+```bash
+chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys; chmod go-w ~
+ls -l ~/.ssh
+ssh -v localhost 2>&1 | tail -n 15
+```
+Then repeat **B2**.
+
+**3. `pdsh@...: localhost: rcmd: socket: Permission denied`**
+```bash
+export PDSH_RCMD_TYPE=ssh
+sudo apt remove -y pdsh
+start-dfs.sh
+```
+
+**4. `Error: JAVA_HOME is not set` / `JAVA_HOME ... does not exist`**
+```bash
+ls /usr/lib/jvm
+nano $HADOOP_HOME/etc/hadoop/hadoop-env.sh      # fix the line: export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+```
+(`Ctrl + W` searches inside nano; type `JAVA_HOME`.)
+
+**5. `hadoop: command not found` / `start-dfs.sh: command not found`**
+```bash
+source ~/.bashrc
+echo $HADOOP_HOME
+ls $HADOOP_HOME/bin | head
+```
+Empty `HADOOP_HOME` means redo **B4**. Also check you open the terminal as the same user.
+
+**6. `jps: command not found`** (only the JRE is installed)
+```bash
+sudo apt install -y openjdk-11-jdk
+```
+
+**7. NameNode missing in `jps`**
+```bash
+tail -n 40 $HADOOP_HOME/logs/hadoop-*-namenode-*.log
+```
+- Log says `NameNode is not formatted` -> `hdfs namenode -format` (only then), `start-dfs.sh`.
+- Log says `Address already in use` -> `sudo lsof -i :9000` then `sudo kill -9 PID`, start again.
+- Log says `Incorrect configuration: namenode address ... is not configured` -> `core-site.xml` is wrong/empty: redo **B5**.
+
+**8. DataNode missing; log shows `Incompatible clusterIDs`** (happens after formatting twice). Clean restart (this deletes HDFS data; acceptable in a lab):
 ```bash
 stop-yarn.sh; stop-dfs.sh
 rm -rf ~/hadoopdata/namenode/* ~/hadoopdata/datanode/* ~/hadoopdata/tmp/*
 hdfs namenode -format
 start-dfs.sh; start-yarn.sh; jps
 ```
+DataNode log `Permission denied` on its folder: `chmod -R 755 ~/hadoopdata && chown -R $USER:$USER ~/hadoopdata`.
 
-- `Address already in use` / old daemons still alive -> `jps | grep -E 'NameNode|DataNode|SecondaryNameNode|ResourceManager|NodeManager' | awk '{print $1}' | xargs -r kill -9`, then start again. For a foreign process: `sudo lsof -i :9000` and kill that PID.
-- `Name node is in safe mode` -> wait 30 s after start, else `hdfs dfsadmin -safemode leave`.
-- `Connection refused ... localhost:9000` -> NameNode is down: `start-dfs.sh`, check `jps`.
-- `FileAlreadyExistsException: Output directory ... already exists` -> `hdfs dfs -rm -r <output path>`.
-- `Input path does not exist` -> `hdfs dfs -ls /user/$USER/`; redo the `-put` (the folder is `/user/$USER/input`, not your Linux path).
-- Job sits at `ACCEPTED` or `Container ... is running beyond virtual memory limits` -> `jps` must show NodeManager; free RAM (close Firefox/Eclipse); the vmem line in `yarn-site.xml` is already false; restart YARN.
-- `Could not find or load main class org.apache.hadoop.mapreduce.v2.app.MRAppMaster` -> `mapred-site.xml` classpath/env lines missing or mistyped; rewrite it from D5, then `stop-yarn.sh; start-yarn.sh`.
-- `Premature end of file` / `Unexpected close tag` -> a broken XML file; rewrite that file from D5.
-- Warning `Unable to load native-hadoop library` -> harmless, ignore.
-- Errors mentioning `InaccessibleObjectException` or `java.lang.reflect` -> you are on Java 17+; switch to 11 (A4).
-- `wget` cannot resolve host -> VM network (A2). Retry with `wget -c`.
+**9. Old daemons keep running / ports busy** (`Address already in use`, `Stale pid`)
+```bash
+stop-yarn.sh; stop-dfs.sh
+jps | grep -E 'NameNode|DataNode|SecondaryNameNode|ResourceManager|NodeManager' | awk '{print $1}' | xargs -r kill -9
+sudo lsof -i :9000 -i :9870 -i :8088
+start-dfs.sh; start-yarn.sh; jps
+```
+
+**10. `Connection refused ... localhost:9000`** while running `hdfs dfs ...` -> NameNode is down: `start-dfs.sh`, `jps`, read item 7.
+
+**11. `Name node is in safe mode`** -> wait 30 seconds after start, or `hdfs dfsadmin -safemode leave`.
+
+**12. `FileAlreadyExistsException: Output directory ... already exists`** -> `hdfs dfs -rm -r /user/$USER/output` (use your folder name).
+
+**13. `Input path does not exist: hdfs://localhost:9000/...`** -> Linux paths are not HDFS paths. List with `hdfs dfs -ls /user/$USER/` and redo the `-put` of **B7**.
+
+**14. Job stays at `ACCEPTED` / never starts / `Container is running beyond virtual memory limits`**
+```bash
+jps | grep -E 'ResourceManager|NodeManager'      # both must be listed
+free -h                                          # close Firefox/Eclipse; add swap (A5)
+yarn node -list                                  # should show 1 RUNNING node
+stop-yarn.sh; start-yarn.sh
+```
+
+**15. `Could not find or load main class org.apache.hadoop.mapreduce.v2.app.MRAppMaster`** -> the classpath/env lines in `mapred-site.xml` are missing or mistyped. Redo **B5**, then `stop-yarn.sh; start-yarn.sh` and rerun the job.
+
+**16. `Premature end of file` / `Unexpected close tag` / `XML document structures must start and end`** -> a config file is damaged. Redo **B5** and run the `xmllint` check.
+
+**17. `InaccessibleObjectException` / `java.lang.reflect` errors** -> Hadoop 3.3 is running on Java 17+. Do **A8** (Java 11), then `stop-yarn.sh; stop-dfs.sh; start-dfs.sh; start-yarn.sh`.
+
+**18. `WARN util.NativeCodeLoader: Unable to load native-hadoop library`** -> harmless; ignore.
+
+**19. `ssh: Could not resolve hostname ...` / hostname problems**
+```bash
+hostname
+echo "127.0.0.1 localhost $(hostname)" | sudo tee -a /etc/hosts
+```
+
+**20. `Cannot allocate memory` / VM freezes** -> add swap (**A5**), close other apps, run `start-dfs.sh` then `start-yarn.sh`, not everything at once.
+
+**21. `tar: Error is not recoverable` / `gzip: unexpected end of file` / `wget` timeout** -> broken download. `rm ~/hadoop-3.3.6.tar.gz` and repeat **B3**. If the network is slow, download the same URL in Firefox and move the file to `~`.
+
+**22. Everything is broken, start fresh** (clean reinstall, keeps your input files in `~/wc_input`)
+```bash
+stop-yarn.sh 2>/dev/null; stop-dfs.sh 2>/dev/null
+jps | awk '$2!="Jps"{print $1}' | xargs -r kill -9
+sudo rm -rf /usr/local/hadoop ~/hadoopdata
+sed -i '/HADOOP_HOME\|HADOOP_CONF_DIR\|PDSH_RCMD_TYPE/d' ~/.bashrc
+```
+Then open a **new terminal** and repeat from **B3**.
+
+### Viva questions (Hadoop)
+- HDFS vs normal file system? Blocks (128 MB default), replication, NameNode (metadata) vs DataNode (data).
+- Roles of YARN ResourceManager and NodeManager?
+- Map, shuffle/sort, reduce phases of WordCount? Why a combiner?
+- Why replication is 1 here? (single node).
 
 ---
 
-## E) Exp 10: Apache Spark 3.5.x on Ubuntu (RDD WordCount, Local & HDFS Modes, PySpark)
+## C) Experiment 9: OpenMP (9A) and MPI (9B)
 
 ### Aim
-Install and configure Apache Spark on Ubuntu VM, verify environment variables, launch interactive Spark Shell, and execute an RDD-based Word Count processing job reading from both local file storage and Hadoop HDFS.
+9A: shared-memory parallel programming with OpenMP (threads in one process).
+9B: message-passing parallel programming with MPI (separate processes that send messages).
 
-### E1. Prerequisites & Java Verification
-Spark 3.5.x runs on Java 11 (recommended) or Java 17. Verify Java from Section A4:
+Both are plain C programs. No cloud account needed; everything is offline after the install.
+
+### C0. "Already installed?" check
 ```bash
-java -version    # Must show OpenJDK 11 or 17
+nproc
+gcc --version | head -n 1
+echo | gcc -fopenmp -dM -E - | grep -i _OPENMP
+command -v mpicc mpirun
+mpirun --version 2>&1 | head -n 1
+dpkg -l | grep -E 'openmpi|mpich' | awk '{print $2, $3}'
+hostname; getent hosts "$(hostname)"
 ```
 
-### E2. Download and Place Apache Spark
-Download pre-built Spark distribution for Apache Hadoop 3:
-```bash
-cd ~/Downloads
-# Download Spark (using archive mirror to avoid 404 on older builds):
-wget -c https://archive.apache.org/dist/spark/spark-3.5.1/spark-3.5.1-bin-hadoop3.tgz || \
-wget -c https://dlcdn.apache.org/spark/spark-3.5.2/spark-3.5.2-bin-hadoop3.tgz
+| What you see | Meaning | Do |
+|---|---|---|
+| `#define _OPENMP 201511` (or similar) | GCC supports OpenMP | 9A needs no install |
+| `mpicc` and `mpirun` paths shown, `Open MPI` version | MPI ready | 9B needs no install |
+| `mpicc` found but `mpirun --version` says MPICH, or both `openmpi` and `mpich` listed | Two MPI versions mixed | Fix **C5 item 6** |
+| Empty `getent` line for your hostname | `mpirun` may hang | Fix **C5 item 8** |
+| Nothing found | Not installed | **C1** |
 
-# Extract to /usr/local/spark
-tar -xzf spark-3.5.*-bin-hadoop3.tgz
-sudo rm -rf /usr/local/spark
-sudo mv spark-3.5.*-bin-hadoop3 /usr/local/spark
-sudo chown -R "$USER":"$USER" /usr/local/spark
+### C1. Install
+If apt reports a lock, use **A3** first.
+```bash
+sudo apt update
+sudo apt install -y build-essential openmpi-bin libopenmpi-dev
+gcc --version | head -n 1
+mpicc --version | head -n 1
+mpirun --version | head -n 1
 ```
+Expected: GCC version, then `gcc ...`, then `mpirun (Open MPI) 4.x`. Open a **new terminal** if `mpicc` is "not found" right after install.
 
-### E3. Configure Spark Environment Variables
-Append Spark paths to your `~/.bashrc`:
+### C2. Work folder
 ```bash
-cat << 'EOF' >> ~/.bashrc
+mkdir -p ~/lab9 && cd ~/lab9
+pwd          # /home/YOURNAME/lab9
+```
+All files below are created with `cat > file <<'EOF' ... EOF`, so no editor is needed. Paste each whole block including the first and last line.
 
-# Apache Spark Configuration
-export SPARK_HOME=/usr/local/spark
-export PATH=$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin
-export PYSPARK_PYTHON=python3
+---
+
+### 9A. OpenMP
+
+#### 9A-1. Hello (parallel region)
+```bash
+cat > omp_hello.c <<'EOF'
+#include <stdio.h>
+#include <omp.h>
+
+int main(void) {
+    #pragma omp parallel
+    {
+        int tid = omp_get_thread_num();
+        printf("Hello from thread %d of %d\n", tid, omp_get_num_threads());
+    }
+    return 0;
+}
 EOF
+gcc -fopenmp omp_hello.c -o omp_hello
+./omp_hello
+OMP_NUM_THREADS=2 ./omp_hello      # choose how many threads from the command line
+```
+Expected: one line per thread (as many as CPU cores), in **random order** (normal). If every line says "thread 0 of 1", you forgot `-fopenmp`.
 
-source ~/.bashrc
+#### 9A-2. Data sharing: private, firstprivate, lastprivate, critical, atomic, reduction
+```bash
+cat > omp_sharing.c <<'EOF'
+#include <stdio.h>
+#include <omp.h>
 
-# Verify installation
-spark-shell --version
+int main(void) {
+    int x = 10;          /* to demonstrate private / firstprivate */
+    int last = -1;       /* to demonstrate lastprivate */
+    int unsafe = 0, crit = 0, atom = 0, sum = 0;
+    omp_set_num_threads(4);
+
+    /* private: each thread gets its OWN x, uninitialised; original is untouched */
+    #pragma omp parallel private(x)
+    {
+        x = omp_get_thread_num() * 100;
+        printf("private      : thread %d sets its own x = %d\n", omp_get_thread_num(), x);
+    }
+    printf("after private      : original x = %d (unchanged)\n\n", x);
+
+    /* firstprivate: each thread's own x STARTS with the original value (10) */
+    #pragma omp parallel firstprivate(x)
+    {
+        x += omp_get_thread_num();
+        printf("firstprivate : thread %d started from 10, now x = %d\n", omp_get_thread_num(), x);
+    }
+    printf("after firstprivate : original x = %d (unchanged)\n\n", x);
+
+    /* lastprivate: value from the logically LAST iteration is copied out */
+    #pragma omp parallel for lastprivate(last)
+    for (int i = 0; i < 8; i++) last = i;
+    printf("lastprivate  : last = %d (expected 7)\n\n", last);
+
+    /* race condition, then the fixes */
+    #pragma omp parallel for
+    for (int i = 0; i < 100000; i++) unsafe++;              /* WRONG: data race */
+
+    #pragma omp parallel for
+    for (int i = 0; i < 100000; i++) {
+        #pragma omp critical
+        crit++;                                             /* correct, one thread at a time */
+    }
+
+    #pragma omp parallel for
+    for (int i = 0; i < 100000; i++) {
+        #pragma omp atomic
+        atom++;                                             /* correct, faster than critical */
+    }
+
+    #pragma omp parallel for reduction(+:sum)
+    for (int i = 1; i <= 100; i++) sum += i;                /* correct, fastest */
+
+    printf("unsafe counter    = %d (expected 100000, usually LESS)\n", unsafe);
+    printf("critical counter  = %d (expected 100000)\n", crit);
+    printf("atomic counter    = %d (expected 100000)\n", atom);
+    printf("reduction sum 1..100 = %d (expected 5050)\n", sum);
+    return 0;
+}
+EOF
+gcc -fopenmp omp_sharing.c -o omp_sharing
+./omp_sharing
+```
+Expected: private values differ per thread, original `x` stays 10, `last = 7`, unsafe counter usually below 100000, the other three exact.
+
+#### 9A-3. Speed-up measurement (serial vs parallel)
+```bash
+cat > omp_speed.c <<'EOF'
+#include <stdio.h>
+#include <math.h>
+#include <omp.h>
+
+/* ===== CONFIG ===== */
+#define N 80000000L        /* raise if speed-up is not visible */
+/* ================== */
+
+int main(void) {
+    printf("Cores: %d | Max threads: %d\n", omp_get_num_procs(), omp_get_max_threads());
+
+    double t0 = omp_get_wtime(), s1 = 0.0;
+    for (long i = 1; i <= N; i++) s1 += sqrt((double)i);
+    double t1 = omp_get_wtime(), s2 = 0.0;
+
+    #pragma omp parallel for reduction(+:s2)
+    for (long i = 1; i <= N; i++) s2 += sqrt((double)i);
+    double t2 = omp_get_wtime();
+
+    printf("Serial   : %.3f s  (sum = %.1f)\n", t1 - t0, s1);
+    printf("Parallel : %.3f s  (sum = %.1f)\n", t2 - t1, s2);
+    printf("Speed-up : %.2fx\n", (t1 - t0) / (t2 - t1));
+
+    #pragma omp parallel sections
+    {
+        #pragma omp section
+        printf("Section A ran on thread %d\n", omp_get_thread_num());
+        #pragma omp section
+        printf("Section B ran on thread %d\n", omp_get_thread_num());
+    }
+    return 0;
+}
+EOF
+gcc -fopenmp -O2 omp_speed.c -o omp_speed -lm
+for t in 1 2 4; do echo "=== $t thread(s) ==="; OMP_NUM_THREADS=$t ./omp_speed | grep -E 'Serial|Parallel|Speed'; done
+```
+Fill the table in your record: threads vs parallel time vs speed-up. With 1 CPU core in the VM the speed-up stays near 1x (see C5 item 5).
+
+---
+
+### 9B. MPI
+
+#### 9B-1. Hello World
+```bash
+cat > mpi_hello.c <<'EOF'
+#include <mpi.h>
+#include <stdio.h>
+
+int main(int argc, char **argv) {
+    int rank, size;
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    printf("Hello from process %d of %d\n", rank, size);
+    MPI_Finalize();
+    return 0;
+}
+EOF
+mpicc mpi_hello.c -o mpi_hello
+mpirun -np 4 ./mpi_hello
+```
+Expected (any order): `Hello from process 0 of 4` ... `3 of 4`.
+**If you see "There are not enough slots available"** your VM has fewer than 4 cores. Use:
+```bash
+mpirun --oversubscribe -np 4 ./mpi_hello
 ```
 
-### E4. Local RDD WordCount in Scala (spark-shell)
+#### 9B-2. Send/Recv, Bcast, Scatter, Reduce, and parallel pi
+```bash
+cat > mpi_demo.c <<'EOF'
+#include <mpi.h>
+#include <stdio.h>
+#include <stdlib.h>
 
-#### Step 1: Create a test input file
+/* ===== CONFIG ===== */
+#define PER_PROC 4            /* elements each process receives in Scatter */
+#define STEPS    100000000L   /* intervals for the pi integration */
+/* ================== */
+
+int main(int argc, char **argv) {
+    int rank, size;
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    printf("Hello from rank %d of %d\n", rank, size);
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    /* 1. Point-to-point: rank 0 -> rank 1 */
+    if (size >= 2) {
+        if (rank == 0) {
+            int msg = 100;
+            MPI_Send(&msg, 1, MPI_INT, 1, 0, MPI_COMM_WORLD);
+            printf("Rank 0 sent %d to rank 1\n", msg);
+        } else if (rank == 1) {
+            int msg;
+            MPI_Recv(&msg, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            printf("Rank 1 received %d from rank 0\n", msg);
+        }
+    }
+
+    /* 2. Broadcast: rank 0 -> everyone */
+    int value = (rank == 0) ? 42 : 0;
+    MPI_Bcast(&value, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    printf("Rank %d now has broadcast value %d\n", rank, value);
+
+    /* 3. Scatter pieces of an array, sum locally, Reduce to rank 0 */
+    int *all = NULL, local[PER_PROC], part = 0, total = 0;
+    if (rank == 0) {
+        all = malloc(size * PER_PROC * sizeof(int));
+        for (int i = 0; i < size * PER_PROC; i++) all[i] = i + 1;
+    }
+    MPI_Scatter(all, PER_PROC, MPI_INT, local, PER_PROC, MPI_INT, 0, MPI_COMM_WORLD);
+    for (int i = 0; i < PER_PROC; i++) part += local[i];
+    MPI_Reduce(&part, &total, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (rank == 0) {
+        int n = size * PER_PROC;
+        printf("Sum of 1..%d = %d (expected %d)\n", n, total, n * (n + 1) / 2);
+        free(all);
+    }
+
+    /* 4. Pi by numerical integration, work split across ranks */
+    double t0 = MPI_Wtime(), h = 1.0 / (double)STEPS, local_sum = 0.0, pi = 0.0;
+    for (long i = rank; i < STEPS; i += size) {
+        double x = h * ((double)i + 0.5);
+        local_sum += 4.0 / (1.0 + x * x);
+    }
+    local_sum *= h;
+    MPI_Reduce(&local_sum, &pi, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (rank == 0) printf("Pi = %.10f  time = %.3f s using %d processes\n", pi, MPI_Wtime() - t0, size);
+
+    MPI_Finalize();
+    return 0;
+}
+EOF
+mpicc mpi_demo.c -o mpi_demo -lm
+mpirun --oversubscribe -np 4 ./mpi_demo
+for p in 1 2 4; do echo "== $p process(es)"; mpirun --oversubscribe -np $p ./mpi_demo | grep Pi; done
+```
+Expected: `Sum of 1..16 = 136 (expected 136)` and `Pi = 3.1415926536`. Run time falls as `p` grows (up to your core count).
+
+---
+
+### C5. OpenMP and MPI failure fixes
+
+**1. `fatal error: omp.h: No such file or directory`** -> `sudo apt install -y build-essential`; check `gcc --version`.
+
+**2. `undefined reference to 'GOMP_parallel'` / `omp_get_thread_num`** -> compile **with** `-fopenmp`: `gcc -fopenmp file.c -o file`.
+
+**3. `undefined reference to 'sqrt'`** -> put `-lm` **after** the source file: `gcc -fopenmp -O2 file.c -o file -lm`.
+
+**4. Every line says "thread 0 of 1" or only one line prints** -> `-fopenmp` missing, or `OMP_NUM_THREADS=1` is exported: `echo $OMP_NUM_THREADS; unset OMP_NUM_THREADS`.
+
+**5. Speed-up is about 1x or less** -> `nproc` shows 1 (give the VM 2+ CPUs: **A0**), or `N` is too small (raise it), or you forgot `-O2`.
+
+**6. `mpicc: command not found` / `mpirun: command not found`** -> `sudo apt install -y openmpi-bin libopenmpi-dev`, open a **new terminal**.
+Mixed MPICH/Open MPI (`mpicc` and `mpirun` disagree, odd errors like `ompi_mpi_init` / `PMI` failed):
+```bash
+sudo update-alternatives --config mpirun
+sudo update-alternatives --config mpicc
+mpirun --version; mpicc --version     # both must say Open MPI
+```
+If still confused: `sudo apt remove -y mpich libmpich-dev && sudo apt install -y openmpi-bin libopenmpi-dev`.
+
+**7. `There are not enough slots available in the system to satisfy the N slots`** -> use `mpirun --oversubscribe -np N ./prog`, or lower `-np` to `$(nproc)`. For every run in the shell: `export OMPI_MCA_rmaps_base_oversubscribe=1`.
+
+**8. `mpirun` hangs forever / prints nothing / "unable to resolve hostname"** -> your hostname is not in `/etc/hosts`:
+```bash
+hostname
+echo "127.0.0.1 $(hostname)" | sudo tee -a /etc/hosts
+mpirun --oversubscribe -np 2 ./mpi_hello
+```
+Press `Ctrl + C` to stop a hang.
+
+**9. `mpirun has detected an attempt to run as root`** -> you are in a root shell (`sudo -i` / `su`). Use your normal user. Last resort: `mpirun --allow-run-as-root --oversubscribe -np 4 ./mpi_hello`.
+
+**10. `error while loading shared libraries: libmpi.so.40`** -> `sudo ldconfig`, or `sudo apt install --reinstall -y libopenmpi-dev openmpi-bin`.
+
+**11. Warnings: `Read -1, expected ...`, `vader`, `CMA`, `Open MPI failed to TCP connect`, `btl_tcp ... no route`**
+```bash
+export OMPI_MCA_btl_vader_single_copy_mechanism=none
+mpirun --mca btl_tcp_if_include lo --oversubscribe -np 4 ./mpi_demo
+```
+They are warnings, not errors, if the program output still appears.
+
+**12. Program hangs after printing a few lines** -> a `MPI_Send` has no matching `MPI_Recv` (or you ran `-np 1` for code that needs rank 1). Run with `-np 2` or more. `Ctrl + C` to stop.
+
+**13. `Segmentation fault`** in Scatter -> receive buffer size must equal `PER_PROC`; `all` must be allocated only on rank 0 (as in the code).
+
+**14. Output lines in strange order, duplicated "Hello"** -> normal; processes/threads print independently.
+
+**15. `./prog: Permission denied` / `command not found`** -> `chmod +x prog` and run as `./prog` (with `./`).
+
+**16. Compile errors after copying from a Windows editor** -> `sed -i 's/\r$//' file.c`.
+
+**17. ARM VM (Apple silicon) errors about architecture** -> use the arm64 packages exactly as installed by apt (nothing special); do not download x86 binaries.
+
+### Viva questions (OpenMP/MPI)
+- Threads vs processes; shared vs distributed memory.
+- `private` vs `firstprivate` vs `lastprivate`; why `critical`/`atomic`/`reduction` fix a race.
+- `MPI_Send/Recv` vs collective (`Bcast`, `Scatter`, `Reduce`); what are rank and communicator?
+- Why speed-up is below the ideal (overhead, Amdahl's law)?
+
+---
+
+## D) Experiment 10: Apache Spark 3.5.x (RDD WordCount, local and on HDFS)
+
+### Aim
+Install Spark, run the Spark shell, and perform RDD word count on a local text file, then on a file stored in HDFS.
+
+### D0. "Already installed?" check
+```bash
+echo "SPARK_HOME = $SPARK_HOME"
+command -v spark-shell spark-submit pyspark
+spark-submit --version 2>&1 | grep -m1 -i "version"
+ls -d /usr/local/spark* /opt/spark* ~/spark* 2>/dev/null
+grep -n "SPARK" ~/.bashrc
+java -version 2>&1 | head -n 1
+jps
+```
+
+| What you see | Meaning | Do |
+|---|---|---|
+| `version 3.x` printed | Spark already installed | Skip to **D5** (commands are identical) |
+| Folder `/usr/local/spark` exists but `command not found` | Environment missing | Do **D3** only |
+| Folder `/usr/local/spark/spark-3.5.1-bin-hadoop3` (nested) | Wrong extraction | `sudo mv /usr/local/spark/spark-*/* /usr/local/spark/` |
+| Nothing | Not installed | **D1** |
+| `java` is 17/21 | Spark 3.5 works, but Hadoop does not | Prefer Java 11: **A8** |
+
+### D1. Java (Spark 3.5 supports Java 8/11/17; use 11)
+```bash
+java -version 2>&1 | head -n 1       # 11.0.x expected; if not: do A8
+```
+
+### D2. Download and extract (about 380 MB)
+```bash
+cd ~
+wget -c https://archive.apache.org/dist/spark/spark-3.5.1/spark-3.5.1-bin-hadoop3.tgz
+ls -lh spark-3.5.1-bin-hadoop3.tgz
+tar -tzf spark-3.5.1-bin-hadoop3.tgz > /dev/null && echo "ARCHIVE OK"
+```
+Only if `ARCHIVE OK`:
+```bash
+tar -xzf spark-3.5.1-bin-hadoop3.tgz
+sudo rm -rf /usr/local/spark
+sudo mv spark-3.5.1-bin-hadoop3 /usr/local/spark
+sudo chown -R $USER:$USER /usr/local/spark
+ls /usr/local/spark
+```
+Expected: `bin conf jars python sbin ...`.
+(Always use `archive.apache.org`; `dlcdn.apache.org` removes older versions and gives 404.)
+
+### D3. Environment variables
+```bash
+addline() { grep -qxF "$1" ~/.bashrc || echo "$1" >> ~/.bashrc; }
+addline 'export SPARK_HOME=/usr/local/spark'
+addline 'export PATH=$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin'
+addline 'export PYSPARK_PYTHON=python3'
+addline 'export SPARK_LOCAL_IP=127.0.0.1'
+source ~/.bashrc
+spark-submit --version 2>&1 | grep -i -m1 "version"
+```
+Expected: `version 3.5.1`.
+
+### D4. Create the test input
 ```bash
 mkdir -p ~/spark_lab && cd ~/spark_lab
-printf "cloud computing lab spark hadoop\nspark rdd parallel processing cloud\ncloud virtualization hadoop\n" > input.txt
+printf 'cloud computing lab spark hadoop\nspark rdd parallel processing cloud\ncloud virtualization hadoop\n' > input.txt
 cat input.txt
+pwd
 ```
 
-#### Step 2: Launch `spark-shell`
+### D5. WordCount in the Scala shell (the lab method)
 ```bash
+cd ~/spark_lab
+rm -rf spark_output                    # Spark refuses to overwrite an existing output folder
 spark-shell --master "local[*]"
 ```
-*(Wait until the `scala>` prompt appears. Web UI is available at `http://localhost:4040` in VM browser).*
-
-#### Step 3: Run the Word Count RDD Transformations & Actions
-Type the following Scala commands directly into the `scala>` REPL:
+Wait for the `scala>` prompt (10-40 seconds in a VM). **Now type/paste only Scala here**, one line at a time:
 ```scala
-// 1. Read input text file into an RDD of Strings
 val lines = sc.textFile("input.txt")
-
-// 2. Split lines by whitespace into words (Transformation: flatMap)
 val words = lines.flatMap(line => line.split("\\s+"))
-
-// 3. Map each word to a key-value tuple (word, 1) (Transformation: map)
-val pairs = words.map(word => (word.toLowerCase.replaceAll("[^a-z0-9]", ""), 1)).filter(_._1.nonEmpty)
-
-// 4. Aggregate frequencies by key (Transformation: reduceByKey)
+val pairs = words.map(w => (w.toLowerCase.replaceAll("[^a-z0-9]", ""), 1)).filter(_._1.nonEmpty)
 val counts = pairs.reduceByKey(_ + _)
-
-// 5. Trigger execution and print word count results (Action: collect & foreach)
 counts.collect().foreach(println)
-
-// 6. Save word count results to disk (Action: saveAsTextFile)
 counts.saveAsTextFile("spark_output")
-
-// Exit spark-shell
 :quit
 ```
-
-#### Step 4: Verify output on Linux disk
-```bash
-cat spark_output/part-*
-```
-Expected output:
+Expected print (order may differ):
 ```text
-(lab,1)
-(processing,1)
-(computing,1)
-(virtualization,1)
-(hadoop,2)
 (cloud,3)
 (spark,2)
-(parallel,1)
+(hadoop,2)
+(computing,1)
+(lab,1)
 (rdd,1)
+(parallel,1)
+(processing,1)
+(virtualization,1)
+```
+Pasting many lines at once and seeing `<console>: error: illegal start`? Type `:paste`, press Enter, paste the block, press `Ctrl + D`.
+Check the saved result in a **normal terminal**:
+```bash
+ls ~/spark_lab/spark_output
+cat ~/spark_lab/spark_output/part-*
+```
+The Spark web page `http://localhost:4040` works only while `spark-shell` is open (take the screenshot before `:quit`).
+
+### D6. The same job as a script (PySpark with spark-submit; good fallback)
+```bash
+cd ~/spark_lab
+cat > wordcount.py <<'EOF'
+import re, sys
+from pyspark import SparkConf, SparkContext
+
+src = sys.argv[1] if len(sys.argv) > 1 else "input.txt"
+dst = sys.argv[2] if len(sys.argv) > 2 else "py_output"
+
+sc = SparkContext(conf=SparkConf().setAppName("WordCount").setMaster("local[*]"))
+counts = (sc.textFile(src)
+            .flatMap(lambda line: re.findall(r"[a-z0-9]+", line.lower()))
+            .map(lambda w: (w, 1))
+            .reduceByKey(lambda a, b: a + b)
+            .sortBy(lambda kv: -kv[1]))
+for word, n in counts.collect():
+    print(word, n)
+counts.saveAsTextFile(dst)
+sc.stop()
+EOF
+rm -rf py_output
+spark-submit wordcount.py input.txt py_output 2>/dev/null
+cat py_output/part-*
 ```
 
----
-
-### E5. Running Spark WordCount over Hadoop HDFS
-This connects your Spark processing engine to your Hadoop distributed file system (Exp 9).
-
-#### Step 1: Ensure Hadoop HDFS is running
+### D7. Spark on HDFS (needs Experiment 8 running)
 ```bash
-jps    # Check if NameNode and DataNode are active
-# If not running, start HDFS:
-start-dfs.sh
-```
-
-#### Step 2: Upload file to HDFS
-```bash
+jps | grep -E 'NameNode|DataNode'          # both must be listed; if not:  start-dfs.sh
 hdfs dfs -mkdir -p /user/$USER/spark_input
 hdfs dfs -put -f ~/spark_lab/input.txt /user/$USER/spark_input/
+hdfs dfs -rm -r -f /user/$USER/spark_hdfs_out
 hdfs dfs -ls /user/$USER/spark_input
-```
-
-#### Step 3: Execute Spark WordCount reading from and writing to HDFS
-Launch `spark-shell`:
-```bash
 spark-shell --master "local[*]"
 ```
-Inside `scala>`:
+At `scala>`:
 ```scala
 val user = System.getProperty("user.name")
-val hdfsLines = sc.textFile("hdfs://localhost:9000/user/" + user + "/spark_input/input.txt")
-val hdfsCounts = hdfsLines.flatMap(_.split("\\s+")).map((_, 1)).reduceByKey(_ + _)
-hdfsCounts.collect().foreach(println)
-hdfsCounts.saveAsTextFile("hdfs://localhost:9000/user/" + user + "/spark_hdfs_out")
+val inp  = sc.textFile("hdfs://localhost:9000/user/" + user + "/spark_input/input.txt")
+val cnt  = inp.flatMap(_.split("\\s+")).map(w => (w.toLowerCase, 1)).reduceByKey(_ + _)
+cnt.collect().foreach(println)
+cnt.saveAsTextFile("hdfs://localhost:9000/user/" + user + "/spark_hdfs_out")
 :quit
 ```
-
-#### Step 4: Verify HDFS output
+Verify:
 ```bash
+hdfs dfs -ls /user/$USER/spark_hdfs_out
 hdfs dfs -cat /user/$USER/spark_hdfs_out/part-*
 ```
+(The port `9000` must equal `fs.defaultFS` in your Hadoop `core-site.xml`.)
 
----
+### D8. Spark failure fixes
 
-### E6. Zero-Scala Fallback: PySpark (Python WordCount)
-If the lab exam allows Python or you prefer avoiding Scala:
+**1. `spark-shell: command not found`** -> `source ~/.bashrc`; `echo $SPARK_HOME`; `ls $SPARK_HOME/bin | head`. Empty: redo **D3**. Or run directly: `/usr/local/spark/bin/spark-shell`.
+
+**2. `Failed to find Spark jars directory` / `SPARK_HOME` wrong** -> nested folder. `ls /usr/local/spark`; if it shows only one `spark-3.5.1-bin-hadoop3` folder: `sudo mv /usr/local/spark/spark-*/* /usr/local/spark/`.
+
+**3. `Output directory ... already exists` (`FileAlreadyExistsException`)** -> `rm -rf spark_output` (local) or `hdfs dfs -rm -r /user/$USER/spark_hdfs_out` (HDFS), rerun.
+
+**4. `Input path does not exist: file:/.../input.txt`** -> you started Spark in another folder. `cd ~/spark_lab` first, or use the full path `sc.textFile("/home/YOURNAME/spark_lab/input.txt")`.
+
+**5. `java.net.ConnectException: Call From ... to localhost:9000 failed`** -> HDFS is off: `start-dfs.sh; jps`.
+
+**6. `Your hostname resolves to a loopback address` warning** -> harmless; to silence: `export SPARK_LOCAL_IP=127.0.0.1` (already in D3).
+
+**7. `Service 'SparkUI' could not bind on port 4040. Attempting port 4041`** -> harmless (another Spark shell is open). Close old shells: `pkill -f spark-shell`.
+
+**8. `java.lang.OutOfMemoryError: Java heap space` / VM freezes / killed** ->
 ```bash
-pyspark --master "local[*]"
+spark-shell --master "local[2]" --driver-memory 512m
 ```
-Inside `>>>`:
-```python
-rdd = sc.textFile("input.txt")
-counts = rdd.flatMap(lambda line: line.split()) \
-            .map(lambda word: (word.lower(), 1)) \
-            .reduceByKey(lambda a, b: a + b)
-for word, count in counts.collect():
-    print(f"{word}: {count}")
-counts.saveAsTextFile("pyspark_output")
-exit()
-```
+and add swap (**A5**); close Firefox/Eclipse.
+
+**9. `InaccessibleObjectException` on Java 17+** -> use Java 11 (**A8**).
+
+**10. `error: ';' expected but ... found` / `illegal start of simple expression`** -> you pasted shell commands or a broken line into `scala>`. Only Scala belongs at `scala>`. Use `:paste` for blocks.
+
+**11. Shell hangs at start for minutes** -> normal first start in a slow VM; wait up to 2 minutes. If it never ends, `Ctrl + C` and retry with fewer cores: `--master "local[1]"`.
+
+**12. `tar: Error is not recoverable` / `unexpected end of file`** -> broken download; `rm spark-3.5.1-bin-hadoop3.tgz` and redo **D2**.
+
+**13. `WARN NativeCodeLoader: Unable to load native-hadoop library`** -> harmless.
+
+**14. `python3: command not found` for pyspark** -> `sudo apt install -y python3`.
+
+**15. `Permission denied` under `/usr/local/spark`** -> `sudo chown -R $USER:$USER /usr/local/spark`.
+
+### Viva questions (Spark)
+- RDD, transformation (lazy: `flatMap`, `map`, `reduceByKey`) vs action (`collect`, `saveAsTextFile`)?
+- Why is Spark faster than MapReduce? (in-memory, DAG)
+- What does `local[*]` mean? What is `sc`?
 
 ---
 
-### E7. Spark Corner Cases & Failure Troubleshooting Matrix
-
-| Error Message / Symptom | Root Cause | Immediate Working Fix |
-|---|---|---|
-| `org.apache.hadoop.mapred.FileAlreadyExistsException: Output directory ... already exists` | Spark strictly prohibits overwriting existing output directories. | Remove the output folder before rerunning: <br>`rm -rf spark_output` (local) or <br>`hdfs dfs -rm -r /user/$USER/spark_hdfs_out` (HDFS). |
-| `java.lang.reflect.InaccessibleObjectException: Unable to make field private final java.lang.String ... accessible` | Java 17+ strong encapsulation breaks older Spark reflection. | **Fix 1 (Recommended):** Use Java 11: `sudo update-alternatives --set java /usr/lib/jvm/java-11-openjdk-amd64/bin/java`. <br>**Fix 2:** Export JVM module flags in `~/.bashrc`: <br>`export SPARK_SUBMIT_OPTS="--add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.lang.invoke=ALL-UNNAMED --add-opens java.base/java.lang.reflect=ALL-UNNAMED --add-opens java.base/java.io=ALL-UNNAMED --add-opens java.base/java.net=ALL-UNNAMED --add-opens java.base/java.nio=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED --add-opens java.base/sun.nio.ch=ALL-UNNAMED"` |
-| `java.lang.OutOfMemoryError: Java heap space` or VM freezes on `spark-shell` start | Spark defaults to 1 GB heap which exhausts low-RAM VMs. | Start with restricted memory allocation: <br>`spark-shell --driver-memory 512M --executor-memory 512M --master "local[2]"` |
-| `WARN Utils: Service 'SparkUI' could not bind on port 4040. Attempting port 4041.` | Another Spark process is already running or didn't exit cleanly. | Not fatal; Spark automatically picks 4041. To free 4040: <br>`lsof -ti :4040 \| xargs kill -9 2>/dev/null` |
-| `java.net.ConnectException: Call From ... to localhost:9000 failed on connection exception` | Hadoop HDFS NameNode daemon is offline. | Run `start-dfs.sh`, verify `jps` shows `NameNode`, then rerun Spark job. |
-| `input.txt does not exist` | Spark looking in working directory where file is missing. | Start `spark-shell` from `~/spark_lab`, or provide absolute path: <br>`sc.textFile("/home/student/spark_lab/input.txt")`. |
-| `404 Not Found` when running `wget` for Spark | Apache periodically archives older minor releases to archive.apache.org. | Always use the archive link: <br>`https://archive.apache.org/dist/spark/spark-3.5.1/spark-3.5.1-bin-hadoop3.tgz`. |
-
----
-
-## F) Exp 11A: CloudSim 5.0 Simulation Setup in Eclipse (Ubuntu Desktop & Windows)
+## E) Experiment 11A: CloudSim 5.0 installation and first run (Eclipse on Ubuntu)
 
 ### Aim
-Set up and configure the CloudSim 5.0 simulation toolkit inside Eclipse IDE, configure the required Apache Commons Math external libraries on the Java Build Path, and successfully execute baseline cloud computing simulation `CloudSimExample1`.
+Install CloudSim 5.0 in Eclipse, add the Apache Commons Math library, and run the sample simulation `CloudSimExample1` to prove the setup works.
 
----
+### E0. "Already installed?" check
+```bash
+java -version 2>&1 | head -n 1
+javac -version
+mvn -v 2>&1 | head -n 1
+git --version
+snap list 2>/dev/null | grep -i eclipse || echo "Eclipse (snap) NOT installed"
+command -v eclipse
+ls ~/cloudsim_setup 2>/dev/null
+ls ~/eclipse-workspace 2>/dev/null
+find ~ -maxdepth 4 -name "CloudSimExample1.java" 2>/dev/null
+```
 
-### F1. Download and Extract CloudSim Toolkit
-Run these commands in Ubuntu terminal:
+| What you see | Do |
+|---|---|
+| Eclipse listed by `snap list` | Skip E1 |
+| `CloudSimExample1.java` path printed | CloudSim source already downloaded; skip E2 download and use that folder |
+| `~/eclipse-workspace` has a `CloudSim` folder | Open Eclipse, the project may already exist (check Package Explorer) |
+| Java is not 11 | **A8** |
+
+### E1. Install Eclipse (once; about 300 MB)
+If apt/snap says "lock" or "changes in progress", use **A3/A4**.
+```bash
+sudo snap install eclipse --classic
+snap list | grep eclipse
+```
+Slow or failing snap? Use the tarball instead: download "Eclipse IDE for Java Developers" (Linux x86_64 `.tar.gz`) in Firefox from eclipse.org/downloads, then
+```bash
+tar -xzf ~/Downloads/eclipse-java-*.tar.gz -C ~
+~/eclipse/eclipse &
+```
+
+### E2. Download CloudSim 5.0 and the Commons Math library
 ```bash
 mkdir -p ~/cloudsim_setup && cd ~/cloudsim_setup
-
-# Download CloudSim 5.0 release
-wget -c https://github.com/Cloudslab/cloudsim/archive/refs/tags/cloudsim-5.0.tar.gz || \
-wget -c https://github.com/Cloudslab/cloudsim/releases/download/cloudsim-5.0/cloudsim-5.0.tar.gz
-tar -xzf cloudsim-5.0.tar.gz
-
-# Download Apache Commons Math 3.6.1 JAR (Mandatory dependency)
+git clone https://github.com/Cloudslab/cloudsim.git
+cd cloudsim
+git tag | sort -V | tail -n 15
+TAG=$(git tag | grep -i '5\.0' | head -n 1)
+echo "Chosen tag: [$TAG]"
+git checkout "tags/$TAG"
+cd ..
 wget -c https://repo1.maven.org/maven2/org/apache/commons/commons-math3/3.6.1/commons-math3-3.6.1.jar
-
-# Check downloaded files
-ls -l ~/cloudsim_setup
+ls -lh commons-math3-3.6.1.jar
+find ~/cloudsim_setup -name CloudSimExample1.java
 ```
+Expected: a tag containing `5.0`, a JAR of about 2 MB, and a path ending in `.../modules/cloudsim-examples/src/main/java/org/cloudbus/cloudsim/examples/CloudSimExample1.java`.
+- Message `You are in 'detached HEAD' state` after `git checkout` is **normal**.
+- `Chosen tag: []` (empty) -> in Firefox open `github.com/Cloudslab/cloudsim/releases`, download **Source code (zip)** of release 5.0, then `unzip ~/Downloads/cloudsim-*.zip -d ~/cloudsim_setup` and `mv ~/cloudsim_setup/cloudsim-* ~/cloudsim_setup/cloudsim`.
+- `git clone` fails (no internet in lab): use the CloudSim zip/folder given by your lab instructor and put it at `~/cloudsim_setup/cloudsim`.
+- **Do not use the newest `master`/6.x/7.x version for these exercises:** newer versions rename methods (for example `setUserId` -> `setBrokerId`) and the 11B code will not compile.
 
-*(Windows alternative: Download the zip files from GitHub and extract them to `C:\cloudsim-5.0`).*
+### E3. METHOD 1 (recommended): Eclipse with "Link Source" (no Maven needed; works offline)
+Replace `YOURNAME` below with your Ubuntu username (`whoami` shows it).
 
----
+1. **Start Eclipse:** open Activities (top-left), type `Eclipse`, click it (or run `eclipse &`).
+2. **Workspace Launcher** dialog: keep `/home/YOURNAME/eclipse-workspace`, click **Launch**. Close the **Welcome** tab (the X on the tab).
+3. Menu **File -> New -> Java Project**.
+   - **Project name:** `CloudSim`
+   - **JRE:** choose *Use an execution environment JRE:* **JavaSE-11**.
+     If JavaSE-11 is not in the list: click **Configure JREs...** -> **Add...** -> **Standard VM** -> **Next** -> **Directory...** -> select `/usr/lib/jvm/java-11-openjdk-amd64` (arm64 on ARM) -> **Finish** -> tick the new entry -> **Apply and Close**, then choose JavaSE-11 again.
+   - Click **Finish**. If a dialog asks **Create module-info.java**, click **Don't Create**.
+4. **Link the CloudSim source:** in **Package Explorer** (left), right-click project `CloudSim` -> **Build Path -> Link Source...**
+   - *Linked folder location:* **Browse...** -> `/home/YOURNAME/cloudsim_setup/cloudsim/modules/cloudsim/src/main/java` -> **OK**
+   - *Folder name:* `cloudsim-src` -> **Finish**.
+5. **Link the examples:** repeat step 4 with `/home/YOURNAME/cloudsim_setup/cloudsim/modules/cloudsim-examples/src/main/java`, *Folder name:* `cloudsim-examples-src`.
+   (If your folder layout differs, use the directory that **contains** `org/cloudbus/cloudsim/...`; `find` output from E2 tells you.)
+6. **Add the Commons Math JAR:** right-click `CloudSim` -> **Build Path -> Add External Archives...** -> type `Ctrl + L`, paste `/home/YOURNAME/cloudsim_setup/commons-math3-3.6.1.jar`, press Enter.
+   Alternative: right-click `CloudSim` -> **Build Path -> Configure Build Path... -> Libraries** tab -> click **Classpath** -> **Add External JARs...** -> choose the JAR -> **Apply and Close**.
+   A **Referenced Libraries** node with `commons-math3-3.6.1.jar` must now appear under the project.
+7. **Check for errors:** menu **Window -> Show View -> Problems**. It must show **0 errors**. Warnings are fine. Menu **Project -> Clean... -> Clean all projects -> Clean**, wait for the progress bar (bottom-right) to finish.
+8. **Run the sample:** expand `CloudSim -> cloudsim-examples-src -> org.cloudbus.cloudsim.examples`, right-click **CloudSimExample1.java** -> **Run As -> 1 Java Application**. The **Console** tab at the bottom shows the output.
 
-### F2. Step-by-Step Eclipse GUI Navigation Guide
+### E4. METHOD 2: Eclipse "Existing Maven Projects" (needs internet the first time)
+1. **File -> Import...** -> expand **Maven** -> **Existing Maven Projects** -> **Next**.
+2. **Root Directory: Browse...** -> `/home/YOURNAME/cloudsim_setup/cloudsim` -> tick all listed projects -> **Finish**. Wait until the bottom-right progress bar ends (first import downloads libraries and takes minutes).
+3. Errors? Right-click the project -> **Maven -> Update Project...** -> tick **Force Update** -> **OK**.
+4. Run: `cloudsim-examples/src/main/java` -> `org.cloudbus.cloudsim.examples` -> `CloudSimExample1.java` -> **Run As -> Java Application**.
+(Your lab PDF says **File -> Import -> General -> Existing Projects into Workspace**. That only works if the folder contains a `.project` file, for example in the ZIP provided by the lab. If Eclipse says *"No projects are found to import"*, use Method 1 or 2.)
 
-#### Step 1: Launch Eclipse IDE
+### E5. METHOD 3: Pure terminal (use if Eclipse freezes)
 ```bash
-eclipse &
+cd ~/cloudsim_setup/cloudsim
+mvn -q clean install -DskipTests          # needs internet once; takes several minutes
+CS=~/cloudsim_setup/cloudsim
+MATH=$(find ~/.m2 ~/cloudsim_setup -name 'commons-math3-*.jar' 2>/dev/null | head -n 1)
+CP="$CS/modules/cloudsim/target/classes:$CS/modules/cloudsim-examples/target/classes:$MATH"
+java -cp "$CP" org.cloudbus.cloudsim.examples.CloudSimExample1
 ```
-Select your workspace (e.g. `/home/student/eclipse-workspace`) and click **Launch**.
-Close the **Welcome** screen tab if it appears.
+No Maven/internet? Compile straight from source:
+```bash
+MATH=~/cloudsim_setup/commons-math3-3.6.1.jar
+mkdir -p ~/cloudsim_out
+javac -nowarn -cp "$MATH" -d ~/cloudsim_out $(find ~/cloudsim_setup/cloudsim/modules/cloudsim/src/main/java ~/cloudsim_setup/cloudsim/modules/cloudsim-examples/src/main/java -name '*.java')
+java -cp "$HOME/cloudsim_out:$MATH" org.cloudbus.cloudsim.examples.CloudSimExample1
+```
 
-#### Step 2: Import CloudSim Project into Eclipse Workspace
-1. In the top menu bar, click: **File -> Import...**
-2. In the Import dialog box, expand folder **General** and select **Existing Projects into Workspace**. Click **Next >**.
-3. In the "Select root directory" field, click **Browse...**.
-4. Navigate to and select the extracted folder: `~/cloudsim_setup/cloudsim-5.0` (or `cloudsim-cloudsim-5.0`). Click **Open**.
-5. In the Projects box, verify that the project is checked.
-6. Click **Finish**.
-
-> **Fallback if Eclipse doesn't recognize as existing project:**
-> 1. Click **File -> New -> Java Project**.
-> 2. Project name: `CloudSim`.
-> 3. Uncheck **Use default location**, click **Browse...**, and select `~/cloudsim_setup/cloudsim-5.0`.
-> 4. In JRE group: Select **JavaSE-11** (or JavaSE-1.8).
-> 5. Click **Finish**. If asked "Create module-info.java?", click **Don't Create**!
-
-#### Step 3: Configure Apache Commons Math External JAR in Build Path
-1. In the **Package Explorer** pane on the left, right-click the `CloudSim` project.
-2. Select **Build Path -> Configure Build Path...** (or right-click -> **Properties** -> **Java Build Path**).
-3. In the Java Build Path window, click on the **Libraries** tab.
-4. *Important (in Eclipse 2020+):* Click to highlight **Classpath** (not Modulepath).
-5. On the right-hand side, click the button **Add External JARs...**.
-6. Browse to `~/cloudsim_setup/commons-math3-3.6.1.jar`. Select it and click **Open**.
-7. If your CloudSim folder contains a `jars/` or `lib/` directory, click **Add External JARs...** again, select all `.jar` files inside `jars/`, and click **Open**.
-8. Click **Apply and Close**.
-
-#### Step 4: Verify Project Health
-- Look at the `CloudSim` project icon in Package Explorer. There must be **NO RED EXCLAMATION MARK (!) or RED ERROR (X)**.
-- Expand `CloudSim` -> verify that **Referenced Libraries** lists `commons-math3-3.6.1.jar`.
-
-#### Step 5: Execute Baseline CloudSim Simulation
-1. In Package Explorer, expand:
-   `CloudSim` -> `sources` (or `src` / `modules/cloudsim-examples/src/main/java`)
-2. Expand the package: `org.cloudbus.cloudsim.examples`.
-3. Locate `CloudSimExample1.java`.
-4. Right-click `CloudSimExample1.java` -> select **Run As -> 1 Java Application**.
-
-#### Step 6: Verify Console Output
-In the **Console** view at the bottom of Eclipse, verify the simulation trace:
+### E6. Expected console output (CloudSimExample1)
 ```text
 Starting CloudSimExample1...
 Initialising...
@@ -2255,64 +2762,55 @@ Starting CloudSim version 5.0
 Datacenter_0 is starting...
 Broker is starting...
 Entities started.
-0.0: Broker: CloudSimExample1: Cloudlet 0 received by Datacenter_0
-280.1: Broker: CloudSimExample1: Cloudlet 0 returned to Broker
-Broker is shutting down...
-Simulation: No more future events
-CloudInformationService: Notify all entities to shut down.
-Datacenter_0 is shutting down...
-Broker is shutting down...
-Simulation completed.
-Simulation completed.
-
+0.0: Broker: Cloud Resource List received with 1 resource(s)
+0.0: Broker: Trying to Create VM #0 in Datacenter_0
+0.1: Broker: VM #0 has been created in Datacenter #2, Host #0
+0.1: Broker: Sending cloudlet 0 to VM #0
+400.1: Broker: Cloudlet 0 received
+400.1: Broker: All Cloudlets executed. Finishing...
+...
 ========== OUTPUT ==========
 Cloudlet ID    STATUS    Data center ID    VM ID    Time    Start Time    Finish Time
-    0         SUCCESS          2            0       280         0.1          280.1
+    0        SUCCESS        2                0        400        0.1            400.1
 CloudSimExample1 finished!
 ```
+The exact numbers/lines can differ slightly between versions. **Success = a Cloudlet row with `SUCCESS` and the final "finished!" line, with no red stack trace.** Take a screenshot of the Console.
 
----
+### E7. CloudSim / Eclipse failure fixes
 
-### F3. Headless Terminal Fallback (If Eclipse Freezes or GUI Crashes)
-If Eclipse is unavailable or freezes during the exam, you can compile and execute CloudSim directly in the Ubuntu terminal to obtain full marks:
-```bash
-cd ~/cloudsim_setup
-# Compile using standalone javac with classpath
-javac -cp ".:commons-math3-3.6.1.jar:$(find . -name '*.jar' | tr '\n' ':')" -d ./bin $(find . -name "*.java") 2>/dev/null || true
-
-# Run CloudSimExample1
-java -cp ".:bin:commons-math3-3.6.1.jar:$(find . -name '*.jar' | tr '\n' ':')" org.cloudbus.cloudsim.examples.CloudSimExample1
-```
-
----
-
-### F4. CloudSim Corner Cases & Failure Troubleshooting Matrix
-
-| Error Message / Symptom | Root Cause | Immediate Working Fix |
+| Symptom | Cause | Fix |
 |---|---|---|
-| `java.lang.NoClassDefFoundError: org/apache/commons/math3/...` | Commons Math library is missing from Eclipse Build Path. | Right-click project -> **Build Path -> Configure Build Path -> Libraries -> Classpath -> Add External JARs...** -> select `commons-math3-3.6.1.jar` -> Apply and Close. |
-| `module-info.java: error: ... does not open org.cloudbus.cloudsim to ...` | Eclipse generated a Java 9+ `module-info.java` file which enforces strict module encapsulation. | Locate `module-info.java` inside `src` or `sources`, **right-click and Delete it**. CloudSim requires flat classpath. |
-| Red exclamation mark on Project icon: `Unbound classpath container` | Project points to a JDK version that is not installed on the system. | Right-click project -> **Properties -> Java Build Path -> Libraries** -> select JRE System Library -> click **Edit...** -> select **Execution environment: JavaSE-11** (or Installed JRE) -> Finish. |
-| `Source option 5 is no longer supported. Use 7 or later.` or compiler mismatch | Eclipse Java compiler compliance level is set to an unsupported legacy version. | Right-click project -> **Properties -> Java Compiler** -> check "Enable project specific settings" -> change **Compiler compliance level** to `1.8` or `11` -> Click Apply and rebuild. |
-| `The declared package "org.cloudbus.cloudsim.examples" does not match the expected package ""` | The parent folder was not marked as a Java Source Folder. | In Package Explorer, right-click the `sources` (or `src`) folder -> **Build Path -> Use as Source Folder**. |
+| Red errors `The import org.apache.commons.math3 cannot be resolved` or `NoClassDefFoundError: org/apache/commons/math3/...` | Commons Math JAR not on the build path | **E3 step 6**; then **Project -> Clean** |
+| `Project 'CloudSim' has no explicit encoding set` or `The type ... is not accessible` / `module` errors | Eclipse made a `module-info.java` | Delete `module-info.java` (right-click -> Delete). Recreate the project and choose **Don't Create** |
+| `Unbound classpath container: 'JRE System Library [JavaSE-11]'` | JDK 11 not registered in Eclipse | **Window -> Preferences -> Java -> Installed JREs -> Add... -> Standard VM -> Directory** `/usr/lib/jvm/java-11-openjdk-amd64` -> tick it -> **Apply and Close**; then right-click project -> **Build Path -> Configure Build Path -> Libraries -> JRE System Library -> Edit... -> Workspace default JRE** |
+| `Java compiler level does not match the version of the installed Java project facets` / `Source option 5 is no longer supported` | Compliance level too old | Right-click project -> **Properties -> Java Compiler -> Enable project specific settings -> Compiler compliance level = 11** -> **Apply and Close** |
+| `The declared package "org.cloudbus.cloudsim.examples" does not match the expected package ""` | Wrong folder linked / not marked as a source folder | Re-link the folder that **contains** `org/` (E3 steps 4-5), or right-click the folder -> **Build Path -> Use as Source Folder** |
+| **Run As** shows no "Java Application" | The class has no `main`, or the file is not selected | Click once on `CloudSimExample1.java` in Package Explorer, then **Run -> Run As -> Java Application** |
+| `Error: Could not find or load main class ...` | Project not built / errors present | Fix Problems tab to 0 errors, **Project -> Clean**, run again |
+| Eclipse window does not open / "JVM terminated. Exit code=13" | Wrong Java default | `sudo update-alternatives --config java` (choose 11), start Eclipse again from the terminal to see messages |
+| `No projects are found to import` | Folder has no `.project` | Use E3 (Link Source) or E4 (Maven) |
+| `mvn: command not found` | Maven missing | `sudo apt install -y maven` |
+| Maven `release version 17 not supported` / `invalid target release` | Wrong JDK | **A8** (Java 11), `mvn -v` must show Java 11 |
+| Maven `Could not transfer artifact` / `Connection reset` | No internet in VM | Use E5's second block (no Maven) or E3 |
+| `git clone` stuck / `Could not resolve host: github.com` | Network | **A6** |
+| Eclipse very slow | Low RAM | Give VM 4 GB (A0), add swap (A5), close Firefox |
+| `Workspace in use or cannot be created` | A previous Eclipse is still running | `pkill -f eclipse` then start again; or choose a new workspace folder |
 
 ---
 
-## G) Exp 11B: CloudSim Custom Policy - First Come First Serve (FCFS) Resource Allocation
+## F) Experiment 11B: CloudSim FCFS (First Come First Served) resource allocation
 
 ### Aim
-Implement a First-Come First-Served (FCFS) resource allocation and cloudlet scheduling policy in CloudSim. Demonstrate sequential execution of multiple cloudlets with varying execution lengths and verify that tasks are executed strictly in order of arrival without preemption.
+Implement FCFS allocation in CloudSim and show that cloudlets run one after another in arrival order (a later cloudlet waits until the earlier one ends).
 
-### G1. Understanding FCFS Policy in CloudSim
-- **FCFS Scheduling Architecture:** CloudSim implements non-preemptive FCFS cloudlet scheduling using `CloudletSchedulerSpaceShared`.
-- In Space-Shared scheduling, when multiple cloudlets arrive at a Virtual Machine (VM), the VM assigns its processing cores to Cloudlet 1. Subsequent cloudlets wait in a Waiting Queue until the active cloudlet finishes execution.
-- In contrast, `CloudletSchedulerTimeShared` slices CPU time concurrently (Round Robin), meaning all cloudlets finish simultaneously. For FCFS, we specifically configure `CloudletSchedulerSpaceShared`.
+### F1. Idea in four lines
+- CloudSim's `CloudletSchedulerSpaceShared` gives the VM's CPU to one cloudlet at a time; others wait in a queue = **FCFS**.
+- `CloudletSchedulerTimeShared` divides the CPU among all cloudlets at once = round-robin-like (not FCFS).
+- Cloudlets are submitted in order 0, 1, 2, 3 with different lengths (MI = million instructions).
+- Time = length / MIPS. At 250 MIPS: 5000 MI -> 20 s, 10000 -> 40 s, 15000 -> 60 s, 20000 -> 80 s.
 
----
-
-### G2. Complete Working Source Code: `ResourceAllocFCFS.java`
-Create this class inside the `org.cloudbus.cloudsim.examples` package in your Eclipse project:
-
+### F2. The source code (`ResourceAllocFCFS.java`)
+Generic: change only the CONFIG block (number of VMs, speed, cloudlet lengths, FCFS on/off).
 ```java
 package org.cloudbus.cloudsim.examples;
 
@@ -2323,7 +2821,9 @@ import java.util.LinkedList;
 import java.util.List;
 
 import org.cloudbus.cloudsim.Cloudlet;
+import org.cloudbus.cloudsim.CloudletScheduler;
 import org.cloudbus.cloudsim.CloudletSchedulerSpaceShared;
+import org.cloudbus.cloudsim.CloudletSchedulerTimeShared;
 import org.cloudbus.cloudsim.Datacenter;
 import org.cloudbus.cloudsim.DatacenterBroker;
 import org.cloudbus.cloudsim.DatacenterCharacteristics;
@@ -2341,370 +2841,309 @@ import org.cloudbus.cloudsim.provisioners.BwProvisionerSimple;
 import org.cloudbus.cloudsim.provisioners.PeProvisionerSimple;
 import org.cloudbus.cloudsim.provisioners.RamProvisionerSimple;
 
-/**
- * Cloud Computing Lab: Experiment 11B
- * First-Come-First-Serve (FCFS) Cloudlet Resource Allocation Policy Demonstration.
- */
 public class ResourceAllocFCFS {
 
-    private static List<Cloudlet> cloudletList;
-    private static List<Vm> vmlist;
+    // ================= CONFIG: change only these lines =================
+    static final boolean FCFS = true;                          // true = FCFS (space-shared), false = time-shared (for comparison)
+    static final int VM_COUNT = 1;                             // number of VMs
+    static final int VM_MIPS = 250;                            // speed of each VM
+    static final long[] CLOUDLET_LENGTHS = {5000, 10000, 15000, 20000};   // one cloudlet per entry, in arrival order
+    // ===================================================================
 
     public static void main(String[] args) {
-        Log.printLine("========== Starting CloudSim FCFS Resource Allocation Simulation ==========");
-
+        Log.printLine("===== CloudSim FCFS resource allocation (" + (FCFS ? "FCFS / space-shared" : "time-shared") + ") =====");
         try {
-            // Step 1: Initialize CloudSim package
-            int num_user = 1;
-            Calendar calendar = Calendar.getInstance();
-            boolean trace_flag = false;
-            CloudSim.init(num_user, calendar, trace_flag);
+            CloudSim.init(1, Calendar.getInstance(), false);
 
-            // Step 2: Create Datacenter with 1 Host
-            Datacenter datacenter0 = createDatacenter("Datacenter_0");
-
-            // Step 3: Create Broker
-            DatacenterBroker broker = createBroker();
+            createDatacenter("Datacenter_0");
+            DatacenterBroker broker = new DatacenterBroker("Broker");
             int brokerId = broker.getId();
 
-            // Step 4: Create 1 Virtual Machine (VM) with SpaceShared scheduler (FCFS for Cloudlets)
-            vmlist = new ArrayList<Vm>();
-            int vmid = 0;
-            int mips = 250;           // Processing speed: 250 MIPS
-            long size = 10000;        // Image size (MB)
-            int ram = 2048;           // VM memory (MB)
-            long bw = 1000;           // Bandwidth
-            int pesNumber = 1;        // Single core ensures strict FCFS queueing
-            String vmm = "Xen";
-
-            // CloudletSchedulerSpaceShared enforces First-Come-First-Served task queueing
-            Vm vm1 = new Vm(vmid, brokerId, mips, pesNumber, ram, bw, size, vmm, new CloudletSchedulerSpaceShared());
-            vmlist.add(vm1);
-            broker.submitVmList(vmlist);
-
-            // Step 5: Create 4 Cloudlets with different lengths arriving in sequential order
-            cloudletList = new ArrayList<Cloudlet>();
-            UtilizationModel utilizationModel = new UtilizationModelFull();
-
-            // Cloudlet parameters: length (MI), file size, output size
-            long[] cloudletLengths = { 5000, 10000, 15000, 20000 };
-
-            for (int id = 0; id < 4; id++) {
-                Cloudlet cloudlet = new Cloudlet(
-                    id,
-                    cloudletLengths[id],
-                    pesNumber,
-                    300,
-                    300,
-                    utilizationModel,
-                    utilizationModel,
-                    utilizationModel
-                );
-                cloudlet.setUserId(brokerId);
-                cloudlet.setVmId(vmid);
-                cloudletList.add(cloudlet);
+            // ---- VMs ----
+            List<Vm> vmList = new ArrayList<Vm>();
+            for (int i = 0; i < VM_COUNT; i++) {
+                CloudletScheduler scheduler = FCFS ? new CloudletSchedulerSpaceShared()
+                                                   : new CloudletSchedulerTimeShared();
+                vmList.add(new Vm(i, brokerId, VM_MIPS, 1, 512, 1000, 10000, "Xen", scheduler));
             }
+            broker.submitVmList(vmList);
 
+            // ---- Cloudlets (submitted in arrival order) ----
+            List<Cloudlet> cloudletList = new ArrayList<Cloudlet>();
+            UtilizationModel full = new UtilizationModelFull();
+            for (int i = 0; i < CLOUDLET_LENGTHS.length; i++) {
+                Cloudlet c = new Cloudlet(i, CLOUDLET_LENGTHS[i], 1, 300, 300, full, full, full);
+                c.setUserId(brokerId);
+                c.setVmId(i % VM_COUNT);                       // cloudlet i goes to VM (i mod VM_COUNT)
+                cloudletList.add(c);
+            }
             broker.submitCloudletList(cloudletList);
 
-            // Step 6: Start Simulation
             CloudSim.startSimulation();
-
-            // Step 7: Retrieve simulation results
-            List<Cloudlet> newList = broker.getCloudletReceivedList();
+            List<Cloudlet> result = broker.getCloudletReceivedList();
             CloudSim.stopSimulation();
 
-            // Print FCFS results table
-            printCloudletList(newList);
-
-            Log.printLine("========== CloudSim FCFS Simulation Finished Successfully ==========");
+            print(result);
+            Log.printLine("===== Simulation finished =====");
         } catch (Exception e) {
             e.printStackTrace();
-            Log.printLine("Simulation error encountered: " + e.getMessage());
+            Log.printLine("Simulation failed: " + e.getMessage());
         }
     }
 
-    private static Datacenter createDatacenter(String name) {
-        List<Host> hostList = new ArrayList<Host>();
+    private static Datacenter createDatacenter(String name) throws Exception {
         List<Pe> peList = new ArrayList<Pe>();
+        for (int p = 0; p < VM_COUNT; p++) peList.add(new Pe(p, new PeProvisionerSimple(1000)));
 
-        int mips = 1000;
-        peList.add(new Pe(0, new PeProvisionerSimple(mips)));
+        List<Host> hostList = new ArrayList<Host>();
+        hostList.add(new Host(0, new RamProvisionerSimple(16384), new BwProvisionerSimple(100000),
+                1000000, peList, new VmSchedulerTimeShared(peList)));
 
-        int hostId = 0;
-        int ram = 4096;
-        long storage = 1000000;
-        int bw = 10000;
-
-        hostList.add(
-            new Host(
-                hostId,
-                new RamProvisionerSimple(ram),
-                new BwProvisionerSimple(bw),
-                storage,
-                peList,
-                new VmSchedulerTimeShared(peList)
-            )
-        );
-
-        String arch = "x86";
-        String os = "Linux";
-        String vmm = "Xen";
-        double time_zone = 10.0;
-        double cost = 3.0;
-        double costPerMem = 0.05;
-        double costPerStorage = 0.001;
-        double costPerBw = 0.0;
-        LinkedList<Storage> storageList = new LinkedList<Storage>();
-
-        DatacenterCharacteristics characteristics = new DatacenterCharacteristics(
-            arch, os, vmm, hostList, time_zone, cost, costPerMem, costPerStorage, costPerBw
-        );
-
-        Datacenter datacenter = null;
-        try {
-            datacenter = new Datacenter(name, characteristics, new VmAllocationPolicySimple(hostList), storageList, 0);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return datacenter;
+        DatacenterCharacteristics ch = new DatacenterCharacteristics("x86", "Linux", "Xen", hostList,
+                10.0, 3.0, 0.05, 0.001, 0.0);
+        return new Datacenter(name, ch, new VmAllocationPolicySimple(hostList), new LinkedList<Storage>(), 0);
     }
 
-    private static DatacenterBroker createBroker() {
-        DatacenterBroker broker = null;
-        try {
-            broker = new DatacenterBroker("Broker");
-        } catch (Exception e) {
-            e.printStackTrace();
-            return null;
-        }
-        return broker;
-    }
-
-    private static void printCloudletList(List<Cloudlet> list) {
-        int size = list.size();
-        Cloudlet cloudlet;
-
-        String indent = "    ";
+    private static void print(List<Cloudlet> list) {
+        String t = "    ";
+        DecimalFormat f = new DecimalFormat("###.##");
         Log.printLine();
-        Log.printLine("========== FCFS EXECUTION RESULTS ==========");
-        Log.printLine("Cloudlet ID" + indent + "STATUS" + indent +
-                "Data center ID" + indent + "VM ID" + indent + "Time" + indent + "Start Time" + indent + "Finish Time");
-
-        DecimalFormat dft = new DecimalFormat("###.##");
-        for (int i = 0; i < size; i++) {
-            cloudlet = list.get(i);
-            Log.print(indent + cloudlet.getCloudletId() + indent + indent);
-
-            if (cloudlet.getCloudletStatus() == Cloudlet.SUCCESS) {
-                Log.print("SUCCESS");
-                Log.printLine(indent + indent + cloudlet.getResourceId() + indent + indent + indent + cloudlet.getVmId() +
-                        indent + indent + dft.format(cloudlet.getActualCPUTime()) + indent + indent + dft.format(cloudlet.getExecStartTime()) +
-                        indent + indent + dft.format(cloudlet.getFinishTime()));
+        Log.printLine("========== OUTPUT ==========");
+        Log.printLine("Cloudlet" + t + "STATUS" + t + "DC" + t + "VM" + t + "Time" + t + "Start" + t + "Finish" + t + "Waited");
+        for (Cloudlet c : list) {
+            if (c.getCloudletStatus() == Cloudlet.SUCCESS) {
+                double waited = c.getExecStartTime() - c.getSubmissionTime();
+                Log.printLine(c.getCloudletId() + t + "SUCCESS" + t + c.getResourceId() + t + c.getVmId() + t
+                        + f.format(c.getActualCPUTime()) + t + f.format(c.getExecStartTime()) + t
+                        + f.format(c.getFinishTime()) + t + f.format(waited));
             }
         }
-        Log.printLine("============================================");
     }
 }
 ```
 
----
+### F3. Create and run it in Eclipse (Method 1 or 2 project)
+1. In **Package Explorer** expand `cloudsim-examples-src` (Method 2: `cloudsim-examples/src/main/java`).
+2. Right-click the package **org.cloudbus.cloudsim.examples** -> **New -> Class**.
+3. **Name:** `ResourceAllocFCFS`. Untick *public static void main* (the code already has it). **Finish**.
+4. Click inside the editor, `Ctrl + A` (select all), paste the code from F2 (it replaces everything), `Ctrl + S` (save). The editor must show **no red marks**.
+5. Right-click inside the editor (or the file in Package Explorer) -> **Run As -> 1 Java Application**. Read the **Console** tab.
+(If your lab names the class `resourcealloc`, rename both the file and the `public class` line; the name must match.)
 
-### G3. Step-by-Step Eclipse Navigation for Exp 11B
-1. In Eclipse **Package Explorer**, expand `CloudSim` -> `sources` (or `src`).
-2. Right-click the package `org.cloudbus.cloudsim.examples` -> select **New -> Class**.
-3. In the "Name" field, type exactly: `ResourceAllocFCFS`.
-4. Click **Finish**.
-5. Select all existing text in `ResourceAllocFCFS.java` and paste the complete source code from above.
-6. Press `Ctrl + S` to save the file. Ensure no syntax errors appear.
-7. Right-click anywhere in the code editor (or right-click `ResourceAllocFCFS.java` in Package Explorer) -> select **Run As -> 1 Java Application**.
-
----
-
-### G4. Expected Output & Viva Verification
-Verify that the output table shows sequential, non-overlapping start and finish times:
-```text
-========== FCFS EXECUTION RESULTS ==========
-Cloudlet ID    STATUS    Data center ID    VM ID    Time    Start Time    Finish Time
-    0         SUCCESS          2            0        20         0.1           20.1
-    1         SUCCESS          2            0        40        20.1           60.1
-    2         SUCCESS          2            0        60        60.1          120.1
-    3         SUCCESS          2            0        80       120.1          200.1
-============================================
+**Terminal alternative (no Eclipse):**
+```bash
+nano ~/cloudsim_setup/ResourceAllocFCFS.java        # paste the code, Ctrl+O, Enter, Ctrl+X
+CS=~/cloudsim_setup/cloudsim
+MATH=$(find ~/.m2 ~/cloudsim_setup -name 'commons-math3-*.jar' 2>/dev/null | head -n 1)
+CP="$CS/modules/cloudsim/target/classes:$MATH"
+[ -d $CS/modules/cloudsim/target/classes ] || CP="$HOME/cloudsim_out:$MATH"     # when you built with the E5 no-Maven block
+mkdir -p ~/cloudsim_fcfs
+javac -nowarn -cp "$CP" -d ~/cloudsim_fcfs ~/cloudsim_setup/ResourceAllocFCFS.java
+java -cp "$HOME/cloudsim_fcfs:$CP" org.cloudbus.cloudsim.examples.ResourceAllocFCFS
 ```
-**Why this proves FCFS:**
-- Cloudlet 0 starts at `0.1` and finishes at `20.1`.
-- Cloudlet 1 is held in queue and starts **only after** Cloudlet 0 finishes (Start Time = `20.1`, Finish = `60.1`).
-- Cloudlet 2 starts **only after** Cloudlet 1 finishes (Start Time = `60.1`).
-- Cloudlet 3 starts **only after** Cloudlet 2 finishes (Start Time = `120.1`).
-- This strictly demonstrates First-Come-First-Served resource allocation without preemption.
+
+### F4. Expected output and how to explain it
+With `FCFS = true`:
+```text
+========== OUTPUT ==========
+Cloudlet    STATUS    DC    VM    Time    Start    Finish    Waited
+0    SUCCESS    2    0    20    0.1    20.1    0
+1    SUCCESS    2    0    40    20.1    60.1    20
+2    SUCCESS    2    0    60    60.1    120.1    60
+3    SUCCESS    2    0    80    120.1    200.1    120
+```
+- Cloudlet 1 **starts only when cloudlet 0 finishes** (start 20.1 = finish of cloudlet 0), cloudlet 2 starts at 60.1, cloudlet 3 at 120.1. Waiting time grows because earlier jobs are served first. That is FCFS.
+- Set `FCFS = false`, rerun: all four cloudlets start together at about 0.1 and the short ones finish first (about 80, 140, 180, 200), proving it is *not* FCFS. The last finish stays about 200.1 in both cases.
+- Try `VM_COUNT = 2`: cloudlets 0,2 go to VM 0 and 1,3 to VM 1; total time drops.
+The exact decimals can differ slightly by version; the **order and "start = previous finish"** are what matter.
+
+### F5. FCFS-specific failure fixes
+
+| Symptom | Fix |
+|---|---|
+| `cannot find symbol: method setUserId(int)` | You are on CloudSim 6.x/7.x. Use the 5.0 tag (E2) or change `setUserId` to `setBrokerId` |
+| `The declared package ... does not match` | Class created in the wrong folder; create it through **New -> Class** on the `org.cloudbus.cloudsim.examples` package |
+| `The public type ResourceAllocFCFS must be defined in its own file` | File name and class name differ; make them identical |
+| Console shows `Simulation failed` + `Creation of VM #0 failed` | The Host has too little RAM/PEs: keep `VM_COUNT` PEs in the host (code does) and `VM_MIPS <= 1000` |
+| Output table empty | A cloudlet did not finish; make `VM_MIPS` and lengths smaller/larger consistently; check `Console` for `Creation of VM failed` |
+| All start times equal | `FCFS` is false, or the scheduler line was changed back to `CloudletSchedulerTimeShared` |
+| Eclipse shows red `CloudletScheduler` import | Library not linked; redo E3 step 4-6 and **Project -> Clean** |
+
+### Viva questions (CloudSim)
+- Main CloudSim entities: Datacenter, Host, Vm, Cloudlet, Broker, CloudSim core.
+- Space-shared vs time-shared (VM scheduler vs cloudlet scheduler).
+- What is a MIPS, MI, PE? How is cloudlet time computed?
 
 ---
 
-## H) Exp 12: CloudAnalyst Simulation in NetBeans & Standalone GUI
+## G) Experiment 12: CloudAnalyst (NetBeans + GUI simulation)
 
 ### Aim
-Set up and execute cloud infrastructure and geographic user base simulations using the **CloudAnalyst** simulation tool in NetBeans IDE (or standalone GUI). Evaluate the impact of Data Center Broker routing policies (Closest Data Center vs Optimize Response Time) and VM Load Balancing algorithms (Round Robin vs Throttled) on response times and infrastructure costs.
+Install CloudAnalyst, define user bases and data centers, run a simulation and read response-time and cost results.
 
----
-
-### H1. The 10-Second Zero-Error Direct Launch (Recommended for Lab Exam)
-If NetBeans has compiler errors or plugin issues, CloudAnalyst can be launched instantly as a standalone Java GUI application:
+### G0. "Already installed?" check
 ```bash
-# 1. Download CloudAnalyst zip if not already present
-cd ~/Downloads
-wget -c http://clouds.cis.unimelb.edu.au/cloudsim/CloudAnalyst.zip || \
-wget -c https://raw.githubusercontent.com/manikanta-5/CloudAnalyst/master/CloudAnalyst.zip
+java -version 2>&1 | head -n 1
+snap list 2>/dev/null | grep -i netbeans || echo "NetBeans (snap) NOT installed"
+ls ~/cloudanalyst 2>/dev/null
+find ~ -maxdepth 4 -iname "CloudAnalyst*" 2>/dev/null
+```
+Netbeans listed -> skip G1. A `CloudAnalyst` folder or zip exists -> skip the download in G2.
+
+### G1. Install NetBeans (once)
+```bash
+sudo apt install -y openjdk-17-jdk             # NetBeans itself runs best on 17; your project can still use 11
+sudo snap install netbeans --classic
+snap list | grep netbeans
+```
+Snap errors: **A3/A4**. NetBeans does not start from the menu? Run `netbeans &` in a terminal to see messages; if it complains about Java: `netbeans --jdkhome /usr/lib/jvm/java-17-openjdk-amd64 &`.
+
+### G2. Get CloudAnalyst
+Use the ZIP given by your lab if you have it (copy it into `~/cloudanalyst`). Otherwise try the original link:
+```bash
+mkdir -p ~/cloudanalyst && cd ~/cloudanalyst
+wget -c http://clouds.cis.unimelb.edu.au/cloudsim/CloudAnalyst.zip
+ls -lh CloudAnalyst.zip
 unzip -o CloudAnalyst.zip
-
-# 2. Launch the CloudAnalyst GUI immediately with Java 11:
-cd CloudAnalyst
-java -jar CloudAnalyst.jar || java -jar dist/CloudAnalyst.jar
+find . \( -iname '*.jar' -o -iname 'nbproject' -o -iname 'build.xml' -o -iname 'run*' \) | head -n 30
 ```
-*(The graphical World Map simulation window will appear immediately on your desktop!)*
+(If the download fails, the university server is down or blocked: ask the instructor for the ZIP; do not use random download sites.)
+The `find` output tells you what you have: a `nbproject` folder + `build.xml` = a NetBeans project; a `CloudAnalyst.jar` = can be run directly.
 
----
-
-### H2. Opening and Running in Apache NetBeans IDE
-If the lab manual specifically mandates opening and building within NetBeans:
-
-#### Step 1: Launch NetBeans
+### G3. QUICK START (no IDE): run the program directly
 ```bash
-netbeans &
+cd ~/cloudanalyst
+JAR=$(find . -iname 'CloudAnalyst*.jar' | head -n 1); echo "JAR = $JAR"
+java -jar "$JAR"
+```
+- If it prints `no main manifest attribute`:
+```bash
+jar tf "$JAR" | grep -i 'GuiMain'                      # shows the main class path, e.g. cloudsim/ext/gui/GuiMain.class
+LIBS=$(find . -iname '*.jar' | tr '\n' ':')
+java -cp "$LIBS" cloudsim.ext.gui.GuiMain
+```
+The CloudAnalyst window with the **world map** opens. Continue at **G5**.
+
+### G4. THE LAB WAY: open and run it in NetBeans (exact clicks)
+1. Start NetBeans (Activities -> `NetBeans`, or `netbeans &`). Close the **Start Page** tab.
+2. **Register Java 11 once:** menu **Tools -> Java Platforms** -> **Add Platform...** -> *Java Standard Edition* -> **Next** -> browse to `/usr/lib/jvm/java-11-openjdk-amd64` -> **Next** -> **Finish** -> **Close**.
+3. **File -> Open Project...** (`Ctrl + Shift + O`). Browse to `~/cloudanalyst/...` and select the folder that shows a **small project icon** (the one containing `nbproject` and `build.xml`; **not** its parent folder). Click **Open Project**.
+4. **Projects** panel (left) shows `CloudAnalyst`. A **red "!" / "Resolve Reference Problems"** means missing libraries: right-click the project -> **Resolve Reference Problems...** -> **Resolve...** -> browse to the missing `.jar` (look inside the project's `lib` or `jars` folder, or the extracted ZIP) -> **Open** -> **Close**.
+5. Right-click the project -> **Properties** -> **Libraries**: *Java Platform* dropdown = **JDK 11** (the one you added); **Sources**: *Source/Binary Format* = **11** (or 8) -> **OK**.
+6. Right-click the project -> **Clean and Build**. In the **Output** window at the bottom wait for **BUILD SUCCESSFUL**.
+7. Right-click the project -> **Run** (or press `F6`). If NetBeans asks for a main class: right-click project -> **Properties -> Run -> Main Class -> Browse...** -> pick **cloudsim.ext.gui.GuiMain** -> **Select Main Class -> OK**, then run again.
+8. The CloudAnalyst window opens. Your lab PDF says an error line in the Output window may be ignored **if the window opens**. A build that fails and shows no window is not ignorable; use the fixes in G7.
+
+### G5. Using the CloudAnalyst window (exact order)
+The main window shows a world map and buttons **Configure Simulation**, **Define Internet Characteristics**, **Run Simulation**, **Exit**.
+Regions are numbered **0 = N. America, 1 = S. America, 2 = Europe, 3 = Asia, 4 = Africa, 5 = Oceania**.
+
+**Step 1: click Configure Simulation.** A window with three tabs opens: **Main Configuration**, **Data Center Configuration**, **Advanced**.
+
+**Step 2: tab "Main Configuration"**
+- **Simulation Duration:** leave `60.0 min` (do not set 24 hours; it makes the run very slow).
+- **User bases** table: click **Add New** for each row and fill:
+
+| Name | Region | Requests per user per hr | Data size per request (bytes) | Peak start (GMT) | Peak end (GMT) | Avg peak users | Avg off-peak users |
+|---|---|---|---|---|---|---|---|
+| UB1 | 0 | 60 | 100 | 3 | 9 | 1000 | 100 |
+| UB2 | 2 | 60 | 100 | 13 | 15 | 1000 | 100 |
+| UB3 | 3 | 60 | 100 | 20 | 22 | 1000 | 100 |
+
+- **Application Deployment Configuration:** **Service Broker Policy** dropdown = **Closest Data Center**. Click **Add New** under the deployment table, choose data center `DC1`, VMs `5`, Image size `10000`, Memory `512`, BW `1000`. Add another row for `DC2` the same way.
+  (A data center name must exist in the next tab; if the dropdown is empty, do Step 3 first, then come back.)
+
+**Step 3: tab "Data Center Configuration"**
+- Click **Add New**. Fill row 1: **Name** `DC1`, **Region** `0`, **Arch** `x86`, **OS** `Linux`, **VMM** `Xen`, **Cost per VM $/Hr** `0.1`, **Memory cost $/s** `0.05`, **Storage cost $/s** `0.1`, **Data transfer cost $/Gb** `0.1`, **Physical HW Units** `1`.
+- Row 2: `DC2`, **Region** `3`, same values.
+- Select a data center row and click **Physical HW Details** (button below the table) and set: **Memory (Mb)** `204800`, **Storage (Mb)** `100000000`, **Available BW** `1000000`, **Number of processors** `4`, **Processor speed (MIPS)** `10000`, **VM Policy** `Time Shared`; confirm with **OK**/**Done**. Do it for both data centers.
+
+**Step 4: tab "Advanced"**
+- Leave **User grouping factor** `1000`, **Request grouping factor** `100`, **Executable instruction length** `250`.
+- **Load balancing policy across VMs in a single data center:** choose **Round Robin** first (other options: *Equally spread current execution load*, *Throttled*).
+
+**Step 5: click Done** (bottom of the configuration window). If an error box appears, read it: it names the missing field (usually a data center used in the deployment table but not defined).
+
+**Step 6: back on the main window click Run Simulation.** Wait for the progress bar to complete (seconds to a minute). A **Simulation Results** window opens.
+
+### G6. Results to copy into your record
+The results window shows:
+- **Overall response time summary:** Average, Minimum, Maximum (ms).
+- **Response time by region:** one row per user base (UB1, UB2, UB3).
+- **Data center request servicing times:** average/min/max per data center (DC1, DC2).
+- **Cost:** total virtual machine cost, data transfer cost, grand total ($).
+Take screenshots of all sections.
+
+**Comparison run (usually asked in viva):** change only one thing, run again, fill:
+
+| Run | Service Broker Policy | Load balancing | Avg response time (ms) | Total cost ($) |
+|---|---|---|---|---|
+| 1 | Closest Data Center | Round Robin | ... | ... |
+| 2 | Optimize Response Time | Round Robin | ... | ... |
+| 3 | Closest Data Center | Throttled | ... | ... |
+
+Reopen **Configure Simulation**, change only the dropdown (policy on **Main Configuration**, load balancing on **Advanced**), click **Done**, **Run Simulation**.
+Typical observations: a user base in the same region as a data center gets the lowest response time; more VMs reduce data-center processing time but increase VM cost.
+
+### G7. CloudAnalyst failure fixes
+
+| Symptom | Fix |
+|---|---|
+| `java: command not found` / `UnsupportedClassVersionError` | Wrong Java. Run with Java 11 explicitly: `/usr/lib/jvm/java-11-openjdk-amd64/bin/java -jar CloudAnalyst.jar` or **A8** |
+| `no main manifest attribute` | Use the `-cp ... cloudsim.ext.gui.GuiMain` form in G3 |
+| `Error: Could not find or load main class cloudsim.ext.gui.GuiMain` | Class path missing the jars: use the `find ... | tr` LIBS line from G3 from the correct folder; confirm with `jar tf` where the main class is |
+| NetBeans: `package org.jfree.chart does not exist` or `cannot find symbol` for library classes | Missing JARs: project **Properties -> Libraries -> Compile -> Add JAR/Folder...** and add every `.jar` from the ZIP's `lib`/`jars` folder |
+| NetBeans: project opens with red "!" | Right-click -> **Resolve Reference Problems** (G4 step 4) |
+| NetBeans says *"Project requires JDK X"* or build errors about source/target | **Properties -> Libraries -> Java Platform = JDK 11**, **Sources -> Source/Binary Format = 11** (or 8) |
+| `Open Project` shows nothing selectable | You selected the parent folder; go one level inside until the folder has the project icon (contains `nbproject`) |
+| NetBeans will not start | `sudo apt install -y openjdk-17-jdk`; `netbeans --jdkhome /usr/lib/jvm/java-17-openjdk-amd64 &` |
+| `Cannot connect to X server` / `No X11 DISPLAY variable was set` | Start it from a terminal **inside the VM desktop**, not from SSH; or `export DISPLAY=:0` |
+| Window opens but the map is blank/grey | `java -Dsun.java2d.opengl=false -Dsun.java2d.xrender=false -jar CloudAnalyst.jar`; or enable **3D acceleration** in VirtualBox Display settings |
+| **Done** shows an error | A data center used in the deployment table is not defined (or region number/field empty): fix and click Done again |
+| Simulation never finishes / `OutOfMemoryError` | Keep duration 60 min, reduce users (e.g. peak 500), run with `java -Xmx1024m -jar CloudAnalyst.jar` |
+| Results window did not open | Re-open **Run Simulation**; watch the Output/terminal for exceptions; if `NullPointerException`, a required table (user base/DC) is empty |
+| Download link dead (`404`, `could not resolve host`) | Use the lab-provided ZIP; do not download JARs from unofficial sites |
+
+### Viva questions (CloudAnalyst)
+- What does CloudAnalyst model? (geographically distributed user bases, data centers, response time, cost; built on CloudSim)
+- What do the Service Broker Policies do? What is Round Robin vs Throttled load balancing?
+- Why does response time change when a data center is moved to another region? (network latency)
+
+---
+
+## H) Final checklist and lab-record helper
+
+### H1. The night before the lab (10 minutes)
+```bash
+bash ~/fixapt.sh                  # only if apt complained earlier
+bash ~/labcheck.sh                # [MISSING] lines = what to install
+start-dfs.sh && start-yarn.sh && jps            # Hadoop: 5 daemons
+mpirun --oversubscribe -np 2 ~/lab9/mpi_hello   # MPI works
+~/lab9/omp_hello                                # OpenMP works
+echo 'hello spark hello' | spark-shell --master "local[1]" 2>&1 | tail -n 3   # Spark starts
+```
+Also confirm: VM has 4 GB RAM and 2+ CPUs, 10+ GB free disk (`df -h /`), internet works (`ping -c 2 archive.ubuntu.com`), Eclipse and NetBeans open once, and your VM snapshot is saved (VirtualBox: **Machine -> Take Snapshot**). A snapshot lets you restore a working VM in one click if something breaks during the lab.
+
+### H2. During the lab: five habits that save marks
+1. **Read the last 10 lines of the error**, not the first. Copy the exact message into the matching fix table in this sheet.
+2. **Run `bash ~/labcheck.sh`** if something "was working yesterday".
+3. **Never run `hdfs namenode -format` or `rm -rf` unless a fix above tells you to.**
+4. **Take a screenshot after each successful step** (command + output visible).
+5. If a long download fails, the same command with `wget -c` resumes it.
+
+### H3. Record format
+```text
+Aim:        one line.
+Software:   names and versions (java -version, hadoop version, spark-submit --version, mpirun --version).
+Procedure:  numbered steps (copy from the section "Steps").
+Program:    code or commands.
+Output:     screenshot or pasted real output.
+Result:     Thus, the experiment was executed successfully and the output was verified.
 ```
 
-#### Step 2: Open CloudAnalyst Project
-1. In the top menu bar, click: **File -> Open Project...** (or `Ctrl + Shift + O`).
-2. Navigate to your extracted `~/Downloads/CloudAnalyst` directory.
-3. Look for the folder with the coffee cup icon labeled `CloudAnalyst`. Select it and click **Open Project**.
-
-#### Step 3: Resolve Project Libraries (if prompted)
-1. If NetBeans displays a "Resolve Missing Server / Libraries" warning:
-   - Right-click `CloudAnalyst` in the Projects window -> select **Properties**.
-   - Click **Libraries** on the left panel.
-   - Ensure the Java Platform is set to **JDK 11** (or JDK 1.8).
-   - Under Compile-time Libraries, if any JAR shows red, click **Add JAR/Folder...**, navigate to `CloudAnalyst/lib`, select all `.jar` files, and click **Open**.
-   - Click **OK**.
-
-#### Step 4: Clean, Build, and Run
-1. Right-click the `CloudAnalyst` project node -> click **Clean and Build**.
-2. Look at the Output window at the bottom: verify `BUILD SUCCESSFUL`.
-3. Right-click `CloudAnalyst` -> click **Run** (or press `F6`).
-
 ---
-
-### H3. Exact Navigational Steps in the CloudAnalyst GUI Simulation
-
-#### Step 1: Main Simulation Window
-When CloudAnalyst opens, you will see a world map displaying 6 global regions (0: N. America, 1: S. America, 2: Europe, 3: Africa, 4: Asia, 5: Oceania).
-- Click the large button in the top-left toolbar labeled: **Configure Simulation**.
-
-#### Step 2: Simulation Duration Configuration (CRITICAL STEP)
-In the Simulation Configuration window:
-- Locate the **Simulation Duration** field at the top right.
-- Change the value from `24.0` (hours) to: `1.0` (or `0.1` hours / 60 minutes).
-> **CRITICAL EXAM TIP:** If you leave the duration at 24 hours, the simulation simulates 24 hours of global web traffic, which creates millions of events and may freeze your VM. Setting `1.0` or `0.1` hours completes in 3 seconds while giving the exact same analytical charts!
-
-#### Step 3: Geographic User Bases Configuration
-In the **User Bases** table (middle-left panel):
-Set up 3 User Bases representing users in different continents:
-- **UB1**:
-  - Region: `0` (North America)
-  - Requests per User per Hr: `60`
-  - Peak Hours: `3` to `9`
-  - Avg Peak Users: `1000`
-  - Avg Off-Peak Users: `100`
-- **UB2**:
-  - Region: `1` (South America)
-  - Requests per User per Hr: `60`
-  - Peak Hours: `7` to `13`
-  - Avg Peak Users: `1000`
-  - Avg Off-Peak Users: `100`
-- **UB3**:
-  - Region: `2` (Europe)
-  - Requests per User per Hr: `60`
-  - Peak Hours: `12` to `18`
-  - Avg Peak Users: `1000`
-  - Avg Off-Peak Users: `100`
-
-#### Step 4: Data Centers Configuration
-Click on the **Data Centers** section / tab (middle-right panel):
-Configure 2 Data Centers:
-- **DC1 (North America Data Center)**:
-  - Name: `DC1`
-  - Region: `0`
-  - Architecture: `x86`, OS: `Linux`, VMM: `Xen`
-  - Physical HW Hosts: `4`
-  - Host RAM: `204800` MB, Storage: `1000000` MB, Available BW: `1000000`
-  - Virtual Machines: Click the VM configuration row:
-    - Number of VMs: `4`
-    - Image Size: `10000`
-    - VM Memory (RAM): `512` MB
-    - Bandwidth: `1000`
-- **DC2 (Europe Data Center)**:
-  - Name: `DC2`
-  - Region: `2`
-  - Architecture: `x86`, OS: `Linux`, VMM: `Xen`
-  - Physical HW Hosts: `4`
-  - Host RAM: `204800` MB, Storage: `1000000` MB, Available BW: `1000000`
-  - Virtual Machines:
-    - Number of VMs: `4`
-    - VM Memory (RAM): `512` MB
-
-#### Step 5: Service Broker Policy Selection
-In the **Service Broker Policy** dropdown menu (bottom left of config dialog), select:
-- **Closest Data Center** (Routes user requests to the DC with lowest network latency).
-*(For comparison studies in your viva, you can run a second trial choosing **Optimize Response Time**).*
-
-#### Step 6: Load Balancing Policy Selection
-In the **Load Balancing Policy** dropdown menu inside Data Center configuration, select:
-- **Round Robin** (Distributes incoming requests equally among VMs in circular order).
-*(For comparison, **Throttled** allocates requests only up to a fixed VM threshold).*
-
-#### Step 7: Finalize & Run
-1. Click the **Done** button in the bottom-right corner of the configuration dialog.
-2. The dialog will close, returning you to the World Map.
-3. In the top toolbar, click the button: **Run Simulation**.
-4. A progress popup dialog appears ("Simulating..."). Wait for the progress bar to reach 100%.
-5. The popup will say: "Simulation Completed". Click **OK**.
-
----
-
-### H4. Analyzing Simulation Results & Lab Viva Metrics
-The **Simulation Results** window opens automatically with statistical metrics. Capture these tables and graphs for your lab record:
-
-#### 1. Overall Response Time Table
-- **Average (ms):** e.g. `248.52 ms`
-- **Minimum (ms):** e.g. `42.10 ms`
-- **Maximum (ms):** e.g. `512.30 ms`
-
-#### 2. Response Time by Region / User Base
-- Table displaying Avg Response Time for UB1, UB2, and UB3.
-- Notice that UB1 has the lowest response time because it is in Region 0 where DC1 resides (low network latency).
-
-#### 3. Data Center Request Servicing Times
-- Displays request processing delay and loading across DC1 and DC2.
-
-#### 4. Cost Analysis Summary
-- **Virtual Machine Cost ($):** Computed based on VM operating hours and memory allocation.
-- **Data Transfer Cost ($):** Computed based on incoming and outgoing network bandwidth.
-- **Total Cost ($):** VM Cost + Data Transfer Cost.
-
----
-
-### H5. CloudAnalyst Corner Cases & Troubleshooting Matrix
-
-| Error Message / Symptom | Root Cause | Immediate Working Fix |
-|---|---|---|
-| `UnsupportedClassVersionError: ... has been compiled by a more recent version of the Java Runtime` | Trying to build/run CloudAnalyst with Java 17/21 instead of Java 11 or 8. | Launch directly using Java 11: <br>`/usr/lib/jvm/java-11-openjdk-amd64/bin/java -jar CloudAnalyst.jar` |
-| NetBeans Build Error: `package org.jfree.chart does not exist` | Missing JFreeChart charting libraries from project properties. | Right-click Project -> **Properties -> Libraries -> Add JAR/Folder** -> select all jars in `CloudAnalyst/lib` (especially `jfreechart.jar`, `jcommon.jar`). |
-| GUI fails to launch: `No X11 DISPLAY variable was set` | Attempting to launch GUI from an SSH session or non-GUI terminal. | Open a terminal inside the Ubuntu Desktop GUI environment (`Ctrl + Alt + T`), or set `export DISPLAY=:0`. |
-| Simulation hangs at 50% or "Java heap space" out of memory | Default simulation duration was left at 24 hours with thousands of users. | Click **Configure Simulation** -> Change Duration to `0.1` hours (or 6 minutes) and reduce Avg Peak Users to `500`. |
-| "Simulation Paused" button stuck | Simulation was paused by user or reached an unhandled event. | Click "Stop Simulation", re-open "Configure Simulation", click "Done", and click "Run Simulation" again. |
-| World Map is blank / gray box | Linux VM 3D graphics acceleration glitch with Java Swing. | Launch Java with 2D software rendering flag: <br>`java -Dsun.java2d.opengl=false -Dsun.java2d.pmoffscreen=false -jar CloudAnalyst.jar` |
----
-
-### 📥 One-Liner to Download this Cheat Sheet inside your Ubuntu VM:
+****### 📥 One-Liner to Download this Cheat Sheet inside your Ubuntu VM:
 ```bash
 wget -c "https://raw.githubusercontent.com/Abpokelove/cloudlab/main/sheet.md" -O lab_sheet.md
-```
+```****
+Last updated: 2026-10-22
